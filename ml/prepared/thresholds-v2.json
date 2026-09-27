@@ -1,0 +1,15 @@
+{
+ "flagThreshold": 0.05,
+ "flagValMetrics": {
+  "precision": 0.4644,
+  "recall": 1.0,
+  "f1": 0.6343
+ },
+ "blockThreshold": 0.89,
+ "blockValMetrics": {
+  "precision": 0.7969,
+  "recall": 0.0372,
+  "f1": 0.0711
+ },
+ "maxValScore": 0.905
+}

@@ -1,0 +1,27 @@
+<!doctype html>
+<html>
+  <head><meta charset="utf-8"><title>SafeScroll E2E test page</title></head>
+  <body style="font-family: system-ui;">
+    <h1>Feed simulation</h1>
+    <main id="feed"></main>
+    <script>
+      // Simulate a feed: one clearly-toxic post, one clean post.
+      const feed = document.getElementById('feed');
+      const mk = (html) => {
+        const a = document.createElement('article');
+        a.innerHTML = html;
+        feed.appendChild(a);
+        return a;
+      };
+      const toxic = mk('<p class="post-text">You are a worthless piece of garbage, nobody would even miss you</p>');
+      toxic.id = 'toxic-post';
+      const clean = mk('<p class="post-text">The weather is lovely today, perfect for a walk in the park</p>');
+      clean.id = 'clean-post';
+      // Delayed extra post (tests MutationObserver path)
+      setTimeout(() => {
+        const t2 = mk('<p class="post-text">Immigrants are cockroaches infesting our cities</p>');
+        t2.id = 'toxic-post-2';
+      }, 1500);
+    </script>
+  </body>
+</html>

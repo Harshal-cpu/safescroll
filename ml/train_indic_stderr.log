@@ -1,0 +1,95 @@
+Traceback (most recent call last):
+  File "C:\Users\Harsh\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\huggingface_hub\utils\_http.py", line 403, in hf_raise_for_status
+    response.raise_for_status()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\Harsh\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\requests\models.py", line 1028, in raise_for_status
+    raise HTTPError(http_error_msg, response=self)
+requests.exceptions.HTTPError: 401 Client Error: Unauthorized for url: https://huggingface.co/ai4bharat/indic-bert/resolve/main/config.json
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\Harsh\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\transformers\utils\hub.py", line 479, in cached_files
+    hf_hub_download(
+    ~~~~~~~~~~~~~~~^
+        path_or_repo_id,
+        ^^^^^^^^^^^^^^^^
+    ...<10 lines>...
+        local_files_only=local_files_only,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\Harsh\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\huggingface_hub\utils\_validators.py", line 114, in _inner_fn
+    return fn(*args, **kwargs)
+  File "C:\Users\Harsh\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\huggingface_hub\file_download.py", line 1014, in hf_hub_download
+    return _hf_hub_download_to_cache_dir(
+        # Destination
+    ...<14 lines>...
+        force_download=force_download,
+    )
+  File "C:\Users\Harsh\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\huggingface_hub\file_download.py", line 1121, in _hf_hub_download_to_cache_dir
+    _raise_on_head_call_error(head_call_error, force_download, local_files_only)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Harsh\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\huggingface_hub\file_download.py", line 1662, in _raise_on_head_call_error
+    raise head_call_error
+  File "C:\Users\Harsh\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\huggingface_hub\file_download.py", line 1550, in _get_metadata_or_catch_error
+    metadata = get_hf_file_metadata(
+        url=url, proxies=proxies, timeout=etag_timeout, headers=headers, token=token, endpoint=endpoint
+    )
+  File "C:\Users\Harsh\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\huggingface_hub\utils\_validators.py", line 114, in _inner_fn
+    return fn(*args, **kwargs)
+  File "C:\Users\Harsh\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\huggingface_hub\file_download.py", line 1467, in get_hf_file_metadata
+    r = _request_wrapper(
+        method="HEAD",
+    ...<5 lines>...
+        timeout=timeout,
+    )
+  File "C:\Users\Harsh\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\huggingface_hub\file_download.py", line 283, in _request_wrapper
+    response = _request_wrapper(
+        method=method,
+    ...<2 lines>...
+        **params,
+    )
+  File "C:\Users\Harsh\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\huggingface_hub\file_download.py", line 307, in _request_wrapper
+    hf_raise_for_status(response)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^
+  File "C:\Users\Harsh\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\huggingface_hub\utils\_http.py", line 420, in hf_raise_for_status
+    raise _format(GatedRepoError, message, response) from e
+huggingface_hub.errors.GatedRepoError: 401 Client Error. (Request ID: Root=1-6ab4e996-758549af2db220334d10474a;3561eefe-3d7e-447f-ac9c-25fc30c01a73)
+
+Cannot access gated repo for url https://huggingface.co/ai4bharat/indic-bert/resolve/main/config.json.
+Access to model ai4bharat/indic-bert is restricted. You must have access to it and be authenticated to access it. Please log in.
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "D:\safescroll\ml\train_indicbert.py", line 26, in <module>
+    tok = AutoTokenizer.from_pretrained(BASE)
+  File "C:\Users\Harsh\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\transformers\models\auto\tokenization_auto.py", line 1109, in from_pretrained
+    config = AutoConfig.from_pretrained(
+        pretrained_model_name_or_path, trust_remote_code=trust_remote_code, **kwargs
+    )
+  File "C:\Users\Harsh\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\transformers\models\auto\configuration_auto.py", line 1332, in from_pretrained
+    config_dict, unused_kwargs = PretrainedConfig.get_config_dict(pretrained_model_name_or_path, **kwargs)
+                                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Harsh\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\transformers\configuration_utils.py", line 662, in get_config_dict
+    config_dict, kwargs = cls._get_config_dict(pretrained_model_name_or_path, **kwargs)
+                          ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Harsh\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\transformers\configuration_utils.py", line 721, in _get_config_dict
+    resolved_config_file = cached_file(
+        pretrained_model_name_or_path,
+    ...<10 lines>...
+        _commit_hash=commit_hash,
+    )
+  File "C:\Users\Harsh\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\transformers\utils\hub.py", line 322, in cached_file
+    file = cached_files(path_or_repo_id=path_or_repo_id, filenames=[filename], **kwargs)
+  File "C:\Users\Harsh\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\transformers\utils\hub.py", line 543, in cached_files
+    raise OSError(
+    ...<2 lines>...
+    ) from e
+OSError: You are trying to access a gated repo.
+Make sure to have access to it at https://huggingface.co/ai4bharat/indic-bert.
+401 Client Error. (Request ID: Root=1-6ab4e996-758549af2db220334d10474a;3561eefe-3d7e-447f-ac9c-25fc30c01a73)
+
+Cannot access gated repo for url https://huggingface.co/ai4bharat/indic-bert/resolve/main/config.json.
+Access to model ai4bharat/indic-bert is restricted. You must have access to it and be authenticated to access it. Please log in.

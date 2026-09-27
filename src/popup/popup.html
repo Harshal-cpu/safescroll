@@ -1,0 +1,53 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      body { width: 300px; font: 13px/1.5 system-ui, sans-serif; margin: 0; padding: 14px; background: #12121a; color: #f2f2f7; }
+      h1 { font-size: 15px; margin: 0 0 10px; display: flex; align-items: center; gap: 8px; }
+      .row { display: flex; justify-content: space-between; align-items: center; margin: 8px 0; }
+      .badge { padding: 2px 8px; border-radius: 999px; font-size: 11px; }
+      .ok { background: #16321c; color: #7ee787; } .err { background: #3a1212; color: #ff7b72; }
+      .off { background: #3a3a3a; color: #bbb; }
+      button { background: #2d4a2f; color: #fff; border: 0; border-radius: 6px; padding: 6px 10px; cursor: pointer; }
+      button.danger { background: #4a2d2d; }
+      a { color: #8ab4f8; }
+      .switch { position: relative; width: 40px; height: 22px; }
+      .switch input { opacity: 0; width: 0; height: 0; }
+      .slider { position: absolute; inset: 0; background: #555; border-radius: 999px; cursor: pointer; transition: .2s; }
+      .slider:before { content: ''; position: absolute; height: 16px; width: 16px; left: 3px; top: 3px; background: #fff; border-radius: 50%; transition: .2s; }
+      input:checked + .slider { background: #2ea043; }
+      input:checked + .slider:before { transform: translateX(18px); }
+      .muted { opacity: .6; }
+    </style>
+  </head>
+  <body>
+    <h1>SafeScroll
+      <label class="switch" title="Enable / disable moderation">
+        <input type="checkbox" id="enabled" />
+        <span class="slider"></span>
+      </label>
+    </h1>
+    <div class="row">
+      <span>On-device models</span>
+      <span id="modelState" class="badge off">checking…</span>
+    </div>
+    <div class="row muted" id="sessionRow">
+      <span>This session</span>
+      <span><span id="statBlocked">0</span> blocked · <span id="statFlagged">0</span> flagged</span>
+    </div>
+    <div class="row">
+      <span>All-sites moderation</span>
+      <span id="scopeState" class="badge ok">all sites</span>
+    </div>
+    <div class="row">
+      <span>Pipeline self-test</span>
+      <button id="selfTestBtn">Run</button>
+    </div>
+    <div class="row" id="selfTestResult" style="display:none"></div>
+    <div class="row"><button id="openDash" style="width:100%;background:#1d3a5f;">Open dashboard & settings</button></div>
+    <p style="opacity:.7;font-size:11px">All inference is on-device. No user data leaves the browser.<br />
+    <span class="muted">Currently: English text + image moderation. Hinglish/Hindi coverage disabled for now.</span></p>
+    <script type="module" src="./popup.js"></script>
+  </body>
+</html>
