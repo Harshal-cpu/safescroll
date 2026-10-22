@@ -1,0 +1,27 @@
+<!doctype html>
+<meta charset="utf-8">
+<style>body { font: 16px/1.4 Arial; margin: 30px; width: 360px; } .comment { width: 300px; }</style>
+<div class="comment"><a href="/user/">user</a> <span id="toxic" dir="auto">You are a worthless piece of garbage and nobody wants you here.</span></div>
+<pre id="result">pending</pre>
+<script type="module">
+  import { createBlurShield } from '../src/content/shield.js';
+  const target = document.getElementById('toxic');
+  const box = el => { const r = el.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; };
+  const before = [...target.getClientRects()].map(r => ({ x: r.x, y: r.y, w: r.width, h: r.height }));
+  const shield = createBlurShield(target, { target: 'text' });
+  shield.update({ action: 'block', reasons: [{ source: 'text', action: 'block' }] });
+  const after = [...target.getClientRects()].map(r => ({ x: r.x, y: r.y, w: r.width, h: r.height }));
+  const overlays = [...shield.querySelectorAll('[data-safescroll-fragment]')].map(box);
+  const same = (a, b) => ['x', 'y', 'w', 'h'].every(k => Math.abs(a[k] - b[k]) < 2);
+  const preservesLayout = before.length === after.length && before.every((r, i) => same(r, after[i]));
+  const coversText = before.length === overlays.length && before.every((r, i) => same(r, overlays[i]));
+  shield.destroy();
+  const restored = getComputedStyle(target).display === 'inline' && target.style.display === '';
+  const pass = preservesLayout && coversText && restored;
+  document.documentElement.dataset.testStatus = pass ? 'pass' : 'fail';
+  document.getElementById('result').textContent = JSON.stringify({
+    pass, preservesLayout, coversText, restored,
+    targetDisplay: getComputedStyle(target).display,
+    before, after, overlays
+  });
+</script>

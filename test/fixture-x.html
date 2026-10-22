@@ -1,0 +1,127 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Fixture: x.com timeline DOM</title>
+<style>
+  body { font-family: "TwitterChirp", -apple-system, system-ui, sans-serif; margin:0; background:#000; color:#e7e9ea; }
+  article[data-testid="tweet"] { border-bottom:1px solid #2f3336; padding:12px 16px; display:flex; gap:12px; }
+  .avatar { width:40px; height:40px; border-radius:50%; background:#334; flex:none; }
+  .content { flex:1; }
+  div[data-testid="User-Name"] { color:#71767b; font-size:15px; display:flex; gap:4px; align-items:center; }
+  div[data-testid="tweetText"] { font-size:17px; line-height:1.3; margin-top:4px; white-space:pre-wrap; }
+  div[data-testid="tweetPhoto"] { margin-top:10px; border-radius:16px; overflow:hidden; border:1px solid #2f3336; }
+  div[data-testid="tweetPhoto"] img { display:block; width:100%; height:auto; }
+  div[role="group"] { display:flex; gap:70px; margin-top:10px; color:#71767b; font-size:13px; }
+  div[role="group"] > div { display:flex; align-items:center; gap:6px; }
+  div[data-testid="socialContext"] { color:#71767b; font-size:14px; font-style:italic; }
+  div[data-testid="quoteTweet"] { border:1px solid #2f3336; border-radius:16px; padding:10px; margin-top:10px; }
+</style></head>
+<body>
+
+<!-- Replicates the real X timeline structure: the user handle, display name,
+     timestamp and the Reply/Repost/Like/Share/Views action bar are SIBLINGS of
+     tweetText inside the same <article>. Any extractor that reads leaf blocks or
+     falls back to divs/spans will swallow all of that as "post text". -->
+<article data-testid="tweet" tabindex="-1" role="article" aria-labelledby="alice-x-tweet">
+  <div class="avatar" data-testid="UserAvatar-Container"></div>
+  <div class="content">
+    <div data-testid="User-Name">
+      <span>Alice</span><span>@alice</span><span>·</span><span>2h</span>
+    </div>
+    <div data-testid="tweetText" lang="en" dir="ltr"><span>Finally got the transit pass sorted. The council meeting was actually worth sitting through.</span></div>
+    <div role="group" aria-label="38 replies, 12 reposts, 210 likes, 45 bookmarks, 900 views">
+      <div><span>Reply</span><span>38</span></div>
+      <div><span>Repost</span><span>12</span></div>
+      <div><span>Like</span><span>210</span></div>
+      <div><span>Bookmarks</span><span>45</span></div>
+      <div><span>Share</span><span>900</span></div>
+    </div>
+  </div>
+</article>
+
+<!-- toxic tweet text, buried among the same chrome -->
+<article data-testid="tweet" tabindex="-1" role="article">
+  <div class="avatar" data-testid="UserAvatar-Container"></div>
+  <div class="content">
+    <div data-testid="User-Name"><span>Bob</span><span>@bob</span><span>·</span><span>1h</span></div>
+    <div data-testid="tweetText" lang="en" dir="ltr"><span>Muslims are vermin and should be exterminated from this land forever.</span></div>
+    <div role="group" aria-label="9 replies, 3 reposts, 2 likes, 900 views">
+      <div><span>Reply</span><span>9</span></div>
+      <div><span>Repost</span><span>3</span></div>
+      <div><span>Like</span><span>2</span></div>
+    </div>
+  </div>
+</article>
+
+<!-- MEDIA-ONLY tweet: no tweetText at all. A real X photo tweet. -->
+<article data-testid="tweet" tabindex="-1" role="article">
+  <div class="avatar" data-testid="UserAvatar-Container"></div>
+  <div class="content">
+    <div data-testid="User-Name"><span>Carol</span><span>@carol</span><span>·</span><span>4h</span></div>
+    <div data-testid="tweetPhoto" data-testid-tw="photo">
+      <img alt="Image" src="https://pbs.twimg.com/media/AAAAAAAAAAAAAAAA.jpg" width="640" height="420">
+    </div>
+    <div role="group" aria-label="4 replies, 1 repost, 30 likes, 900 views">
+      <div><span>Reply</span><span>4</span></div>
+      <div><span>Repost</span><span>1</span></div>
+      <div><span>Like</span><span>30</span></div>
+    </div>
+  </div>
+</article>
+
+<!-- REPOST + quoted tweet. The outer tweet has no text of its own; the quoted
+     tweet has its own tweetText which IS user content. -->
+<article data-testid="tweet" tabindex="-1" role="article">
+  <div class="avatar" data-testid="UserAvatar-Container"></div>
+  <div class="content">
+    <div data-testid="socialContext">Reposted from Dave</div>
+    <div data-testid="User-Name"><span>Erin</span><span>@erin</span><span>·</span><span>6h</span></div>
+    <div data-testid="quoteTweet">
+      <div data-testid="User-Name"><span>Dave</span><span>@dave</span><span>·</span><span>7h</span></div>
+      <div data-testid="tweetText" lang="en" dir="ltr"><span>You are a worthless piece of garbage and nobody would even miss you.</span></div>
+    </div>
+    <div role="group" aria-label="2 replies, 0 reposts, 0 likes, 500 views">
+      <div><span>Reply</span><span>2</span></div>
+    </div>
+  </div>
+</article>
+
+<!-- Long tweet with the "Show more" truncation link, as X renders >280 chars -->
+<article data-testid="tweet" tabindex="-1" role="article">
+  <div class="avatar" data-testid="UserAvatar-Container"></div>
+  <div class="content">
+    <div data-testid="User-Name"><span>Frank</span><span>@frank</span><span>·</span><span>8h</span></div>
+    <div data-testid="tweetText" lang="en" dir="ltr"><span>Long thread about the new transit funding package, the route changes, the accessibility concerns and what happens next quarter&nbsp;</span></div>
+    <div data-testid="tweet-text-show-more-link" role="button" tabindex="0">Show more</div>
+    <div role="group" aria-label="11 replies, 5 reposts, 80 likes, 1.2K views">
+      <div><span>Reply</span><span>11</span></div>
+    </div>
+  </div>
+</article>
+
+<!-- Short toxic tweet. This is deliberately below the generic 24-character
+     unit floor and must still be classified by the X adapter. -->
+<article data-testid="tweet" tabindex="-1" role="article">
+  <div class="avatar" data-testid="UserAvatar-Container"></div>
+  <div class="content">
+    <div data-testid="User-Name"><span>Short</span><span>@short</span><span>·</span><span>9h</span></div>
+    <div data-testid="tweetText" lang="en" dir="ltr"><span>kill yourself</span></div>
+    <div role="group" aria-label="0 replies"><div><span>Reply</span></div></div>
+  </div>
+</article>
+
+<!-- User-authored X text outside a tweet: profile bios and direct messages
+     were invisible to the tweet-only adapter. -->
+<section data-testid="UserDescription" dir="auto">You are vermin and nobody wants you here.</section>
+<div data-testid="messageEntry">
+  <div data-testid="messageText" dir="auto">You are a worthless piece of garbage.</div>
+</div>
+
+<!-- A NON-tweet <article>: "Who to follow" module. A bare `article` selector
+     would pick this up; `article[data-testid="tweet"]` must not. -->
+<article role="article" aria-label="Who to follow" class="x-follow-module">
+  <div data-testid="User-Name"><span>Suggested</span><span>@spammer</span><span>·</span><span>Follows you</span></div>
+  <div role="group" aria-label="Follow"><div><span>Follow</span></div></div>
+</article>
+
+</body>
+</html>

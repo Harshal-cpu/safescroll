@@ -5,6 +5,55 @@
 // corpora); this deterministic tier covers the gap. Fully explainable.
 // Severity: >=4 = block tier, 2-3 = flag tier, <=1 = ignored (too mild).
 
+// ---------------------------------------------------------------------------
+// ENGLISH PROFANITY / ABUSE
+//
+// Added because the toxicity MODEL alone does not catch meme captions.
+// unitary/multilingual-toxic-xlm-roberta is trained on identity-directed hate
+// speech, so a profane imperative aimed at nobody ("GO FUCK YOURSELF") is
+// scored well below the 0.50 flag threshold and reported as CLEAN — the image
+// then never blurred. Verified: the text model did not flag it, this list does.
+//
+// Block tier = direct profanity/insult. Flag tier = crude or harassing but not
+// a direct slur. Matching is whole-token (see lexiconCheck), so "ass" in
+// "class" or "Scunthorpe" cannot trigger it.
+// ---------------------------------------------------------------------------
+const EN_BLOCK_TERMS = [
+  'fuck', 'fucking', 'fucked', 'fucker', 'motherfucker', 'motherfucking',
+  'shit', 'shitty', 'bullshit', 'bastard', 'bitch', 'bitches',
+  'cunt', 'wanker', 'twat', 'prick', 'dickhead', 'cockhead',
+  'asshole', 'arsehole', 'assholes', 'dumbass', 'jackass',
+  'whore', 'slut', 'faggot', 'fag', 'retard', 'retarded',
+  'nigger', 'nigga', 'faggot', 'tranny', 'coon', 'kike', 'spic', 'wetback',
+  'rape', 'rapist', 'pedo', 'paedo', 'pedophile',
+  'kill yourself', 'kys', 'neck yourself', 'hang yourself',
+  'worthless piece of garbage', 'nobody would miss you', 'nobody would even miss you',
+  'vermin', 'subhuman', 'animals', 'filth', 'scum'
+];
+
+const EN_FLAG_TERMS = [
+  'damn', 'damned', 'goddamn', 'crap', 'piss', 'pissed', 'arse', 'ass',
+  'dick', 'cock', 'pussy', 'twatty', 'wank', 'bollocks', 'balls',
+  // NOTE: 'stupid', 'moron', 'idiot' and 'loser' are deliberately ABSENT.
+  // The project's own calibration control is "This movie is stupid but the
+  // songs were okay" — it must score as mild, never as a lexicon hit. Putting
+  // 'stupid' in a flag list would flag every mildly-critical review on the web,
+  // which is the exact false-positive class the tier is supposed to avoid.
+  // Mild negativity is the ML model's job (PROFILES.text.mild.flag), not the
+  // lexicon's: the lexicon exists for profanity and abuse, which the model
+  // systematically under-scores.
+  'scumbag', 'shameless', 'disgusting', 'revolting'
+];
+
+// Multi-word terms ("kill yourself", "go fuck yourself") cannot be matched
+// token-by-token without false positives, so they get a whole-string pass.
+const EN_PHRASE_BLOCK = [
+  'kill yourself', 'kys', 'neck yourself', 'hang yourself',
+  'worthless piece of garbage', 'nobody would miss you', 'nobody would even miss you',
+  'go fuck yourself', 'screw you', 'eat shit'
+];
+const EN_PHRASE_FLAG = ['shut up', 'go to hell', 'kiss my ass', 'kiss off', 'get lost'];
+
 const BLOCK_TERMS = [
   "chutia",
   "ghasti",
@@ -260,11 +309,23 @@ export function lexiconCheck(rawText) {
     const variants = [tok, tok.replace(/(.)\1+/gu, '$1')];
     let tier = null, term = tok;
     for (const v of variants) {
-      if (BLOCK_TERMS.includes(v)) { tier = 'block'; term = v; break; }
-      if (!tier && FLAG_TERMS.includes(v)) { tier = 'flag'; term = v; }
+      if (EN_BLOCK_TERMS.includes(v)) { tier = 'block'; term = v; break; }
+      if (!tier && EN_FLAG_TERMS.includes(v)) { tier = 'flag'; term = v; }
+    }
+    if (!tier) {
+      for (const v of variants) {
+        if (BLOCK_TERMS.includes(v)) { tier = 'block'; term = v; break; }
+        if (!tier && FLAG_TERMS.includes(v)) { tier = 'flag'; term = v; }
+      }
     }
     if (tier) hits.push({ term, tier });
   }
+  // Whole-string phrase pass. Multi-word terms ("kill yourself", "go fuck
+  // yourself") cannot be matched token-by-token without false-positives, so
+  // they are matched against the whole normalised string.
+  for (const p of EN_PHRASE_BLOCK) if (text.includes(p)) hits.push({ term: p, tier: 'block' });
+  for (const p of EN_PHRASE_FLAG) if (text.includes(p)) hits.push({ term: p, tier: 'flag' });
+
   if (hits.some(h => h.tier === 'block')) return { action: 'block', hits };
   if (hits.length) return { action: 'flag', hits };
   return null;

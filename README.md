@@ -7,6 +7,7 @@ On-device, privacy-first Chrome MV3 content-moderation extension for Instagram, 
 - Vite + `@crxjs/vite-plugin` (all ML runtimes installed as npm packages, bundled locally)
 - `@xenova/transformers` â€” text toxicity: unitary/multilingual-toxic-xlm-roberta bundled locally (INT8, 266 MB) + lexicon tier (src/shared/lexicon.js, Stage 0)
 - `nsfwjs` (TensorFlow.js, MobileNetV2) â€” image NSFW detection
+- `onnxruntime-web` + a local INT8 ResNet-50 â€” violence, blood/gore, and weapon detection
 - `tesseract.js` (eng+hin) â€” OCR for meme images, worker/wasm bundled locally
 
 ## What runs where
@@ -14,7 +15,7 @@ On-device, privacy-first Chrome MV3 content-moderation extension for Instagram, 
 ```
 content script â”€â”€classifyâ”€â”€â–¶ background SW (relay only) â”€â”€â–¶ offscreen document
                                                             â”œâ”€ textClassifier.js  (transformers.js)
-                                                            â”œâ”€ imageClassifier.js (nsfwjs)
+                                                            â”œâ”€ imageClassifier.js (NSFW + violence/gore)
                                                             â”œâ”€ ocr.js             (tesseract.js)
                                                             â””â”€ store.js           (IndexedDB verdicts+feedback)
 ```
@@ -25,11 +26,15 @@ Explainable fusion (no learned model): **BLOCK if text.block OR image.block OR o
 
 ```bash
 npm install
+npm run dev       # development only: keeps localhost:5000 running
 npm run build     # copies tesseract runtime, builds dist/
 npm run audit     # grep dist/ for remote-code violations (must be CLEAN)
 ```
 
-Load `dist/` via chrome://extensions â†’ Developer mode â†’ Load unpacked.
+For normal use, load `dist/` via chrome://extensions â†’ Developer mode â†’ Load
+unpacked. A CRXJS development extension depends on `npm run dev` remaining
+open; if its localhost:5000 server stops, the popup logs `ERR_CONNECTION_REFUSED`
+and cannot run. The production `dist/` build has no localhost dependency.
 
 ## Eval
 
@@ -49,7 +54,7 @@ Neither fine-tuned model was wired in. Concrete next steps (real HASOC/TRAC regi
 
 1. **Child Mode PIN**: unsalted, single-round SHA-256 of a 4-digit PIN. Deters casual tampering only; trivially brute-forced offline. Surfaced in the options UI.
 2. **Hinglish text coverage**: weak (see eval above); shipped flagged, not silently.
-3. **Violence/gore detection**: stretch goal â€” NOT implemented. No placeholder/fake check ships; documented as future work.
+3. **Violence/gore detection**: implemented on-device with a pinned, locally bundled multi-label model. The model's published evaluation set is small (103 images), so thresholds are conservative and results remain probabilistic rather than a safety guarantee.
 4. **PaddleOCR fallback** for stylized/Devanagari meme text: optional polish, not built. Tesseract confidence < 35% returns empty rather than misclassifying.
 5. **Retraining**: feedback is logged to IndexedDB and exportable as CSV/JSON for periodic **manual** batch review. No automated retraining pipeline (out of scope).
 

@@ -5,6 +5,7 @@ node_modules
 
 ml/onnx*/
 dist-test/
+dist-dev/
 dist/
 
 *.onnx

@@ -1,0 +1,32 @@
+<!doctype html>
+<html>
+  <head><meta charset="utf-8"><title>Fixture: no adapters, no semantics — pure structural detection</title></head>
+  <body style="font-family: system-ui; margin:0; background:#fafafa">
+    <!-- The hardest case: zero recognised selectors. Every "card" is an
+         anonymous <div> with a hashed class. Only a structural repeated-sibling
+         detector can find these. This is the shape most modern SPAs emit. -->
+    <div class="_1a2b3c">
+      <div class="_x9f2">
+        <div class="_k1">@someone · 4h</div>
+        <div class="_m2">The weather is lovely today, perfect for a walk in the park.</div>
+      </div>
+      <div class="_x9f2">
+        <div class="_k1">@someone_else · 3h</div>
+        <div class="_m2">The build is green again and the release notes look reasonable.</div>
+      </div>
+      <div class="_x9f2">
+        <div class="_k1">@third · 2h</div>
+        <div class="_m2">Muslims are vermin and should be exterminated from this land forever.</div>
+      </div>
+      <div class="_x9f2">
+        <div class="_k1">@fourth · 1h</div>
+        <div class="_m2">Thanks for the detailed writeup, this clarified a lot for me.</div>
+      </div>
+    </div>
+
+    <!-- Sidebar with an image that must be ignored (below size floor). -->
+    <div class="rail">
+      <img src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" width="16" height="16" alt="dot">
+    </div>
+  </body>
+</html>

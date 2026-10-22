@@ -1,0 +1,147 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>SafeScroll social adapter fixture</title>
+    <script>
+      // Model Reddit's real Shadow DOM projection. A shield appended directly
+      // to shreddit-post-text-body has no default slot and is therefore not
+      // rendered; SafeScroll must target a visible light-DOM descendant.
+      customElements.define('shreddit-post-text-body', class extends HTMLElement {
+        constructor() {
+          super();
+          this.attachShadow({ mode: 'open' }).innerHTML = '<slot name="text-body"></slot>';
+        }
+      });
+      customElements.define('shreddit-post', class extends HTMLElement {
+        constructor() {
+          super();
+          this.attachShadow({ mode: 'open' }).innerHTML = '<slot name="title"></slot><slot name="text-body"></slot><slot></slot>';
+        }
+      });
+    </script>
+    <style>
+      body { font: 16px/1.5 system-ui, sans-serif; margin: 24px; }
+      article, shreddit-post, shreddit-comment, faceplate-tracker, [role="dialog"], [data-testid$="description"] { display: block; margin: 12px 0; padding: 12px; border: 1px solid #ccc; }
+      li { margin: 8px 0; }
+      #result { white-space: pre-wrap; background: #111; color: #eee; padding: 12px; }
+    </style>
+  </head>
+  <body>
+    <section id="instagram-fixture">
+      <article id="ig-post">
+        <header><a href="/safe_user/">safe_user</a></header>
+        <div role="button"><div><div><span dir="auto">You are a worthless piece of garbage and nobody would miss you.</span></div></div></div>
+        <a href="/p/POST123/">Permalink</a>
+        <ul>
+          <li role="listitem" data-comment-id="ig-c1"><h3><a href="/kind_user/">kind_user</a></h3><span dir="auto">This is a thoughtful and helpful comment.</span></li>
+          <li role="listitem" data-comment-id="ig-c2"><h3><a href="/toxic_user/">toxic_user</a></h3><span dir="auto">Immigrants are cockroaches and should be driven out.</span></li>
+        </ul>
+      </article>
+      <div role="dialog" id="ig-dialog">
+        <ul id="ig-dialog-comments">
+          <!-- Current Instagram renders generated-class DIV rows directly
+               under the comment list rather than semantic LI elements. -->
+          <div id="ig-modern-comment" data-comment-id="ig-c-modern">
+            <div>
+              <a href="/modern_user/"><span>modern_user</span></a>
+              <span id="ig-modern-comment-text" dir="auto">You are vermin and nobody should tolerate you.</span>
+            </div>
+            <div><time datetime="2026-10-08">now</time><button>Reply</button></div>
+          </div>
+        </ul>
+      </div>
+    </section>
+
+    <section id="reddit-fixture">
+      <article id="reddit-canonical-wrapper">
+        <shreddit-post id="t3_fixture" post-title="A deliberately toxic Reddit post title" permalink="/r/example/comments/fixture/post/">
+          <h2 slot="title">A deliberately toxic Reddit post title</h2>
+          <shreddit-post-text-body slot="text-body"><a slot="text-body" href="/r/example/comments/fixture/post/"><p>You are vermin and should be removed from this community.</p></a></shreddit-post-text-body>
+          <a href="/r/example/comments/fixture/post/">Permalink</a>
+        </shreddit-post>
+      </article>
+      <shreddit-comment id="t1_kind" comment-id="t1_kind"><div slot="comment"><p>I disagree, but thanks for explaining your view.</p></div></shreddit-comment>
+      <shreddit-comment id="t1_toxic" comment-id="t1_toxic"><div slot="comment"><p>Muslims are vermin and should be exterminated.</p></div></shreddit-comment>
+      <!-- Reddit has shipped several feed-card roots in parallel. None of
+           these should depend on the comment-only custom element. -->
+      <article id="reddit-home-card" role="article" data-post-id="t3_home">
+        <h2>Homepage post: kill yourself, nobody wants you here.</h2>
+        <a href="/r/example/comments/home/homepage_post/">Open post</a>
+      </article>
+      <faceplate-tracker id="reddit-community-card" source="post" data-post-id="t3_community">
+        <div><h2>Community post: immigrants are cockroaches and should be driven out.</h2></div>
+        <a href="/r/example/comments/community/community_post/">Open post</a>
+      </faceplate-tracker>
+      <div id="reddit-profile-description" data-testid="profile-description">
+        <p>Profile bio: you are a worthless piece of garbage.</p>
+      </div>
+      <article id="reddit-media-card" role="article" data-post-id="t3_media">
+        <a href="/r/example/comments/media/media_post/">Media post</a>
+        <figure><img width="640" height="480" src="/test/meme-clean.jpg" alt="Fixture media"></figure>
+      </article>
+    </section>
+
+    <pre id="result">Running…</pre>
+    <script type="module">
+      import { instagramAdapter, redditAdapter, materialise } from '../src/content/adapters.js';
+      import { createBlurShield } from '../src/content/shield.js';
+
+      // Mirrors Instagram's comment drawer: the comment arrives after the
+      // initial post DOM and must still be discoverable from the added subtree.
+      const lateComment = document.createElement('li');
+      lateComment.setAttribute('role', 'listitem');
+      lateComment.dataset.commentId = 'ig-c3';
+      lateComment.innerHTML = '<h3><a href="/late_user/">late_user</a></h3><span dir="auto">Kill yourself, nobody wants you here.</span>';
+      document.getElementById('ig-dialog-comments').appendChild(lateComment);
+
+      const inspect = (adapter, root) => adapter.units(root).map(el => {
+        const unit = materialise(el, adapter);
+        const textTarget = unit ? adapter.textEl?.(unit) : null;
+        return {
+          tag: el.tagName.toLowerCase(),
+          id: el.id || el.getAttribute('data-comment-id'),
+          text: unit?.text || '',
+          images: unit?.images?.length || 0,
+          textTarget: textTarget?.tagName?.toLowerCase() || null,
+          textTargetVisible: !!textTarget?.getClientRects?.().length
+        };
+      });
+      const instagram = inspect(instagramAdapter, document.getElementById('instagram-fixture'));
+      const lateInstagram = inspect(instagramAdapter, lateComment);
+      const modernInstagramRow = instagramAdapter.containingUnit(document.getElementById('ig-modern-comment-text'));
+      const modernInstagramUnit = instagram.find(u => u.id === 'ig-modern-comment');
+      const reddit = inspect(redditAdapter, document.getElementById('reddit-fixture'));
+      const canonicalRoot = redditAdapter.units(document.getElementById('reddit-canonical-wrapper'))[0];
+      const canonicalUnit = materialise(canonicalRoot, redditAdapter);
+      const textShield = createBlurShield(redditAdapter.textEl(canonicalUnit), { target: 'text' });
+      textShield?.update({ action: 'block', reasons: [] });
+      const redditTextShieldRenders = !!textShield?.getClientRects().length && getComputedStyle(textShield).display !== 'none';
+      textShield?.destroy();
+      const checks = {
+        instagramHasPostAndFourComments: instagram.length === 5,
+        instagramCaptionDoesNotContainComments: instagram[0]?.text.includes('worthless piece') && !instagram[0]?.text.includes('cockroaches'),
+        instagramFindsDialogComment: instagram.some(u => u.text.includes('Kill yourself')),
+        instagramFindsAddedCommentFromMutationRoot: lateInstagram.length === 1 && lateInstagram[0].text.includes('Kill yourself'),
+        instagramFindsModernDivComment: instagram.some(u => u.id === 'ig-modern-comment' && u.text.includes('You are vermin')),
+        instagramResolvesMutationInsideModernDivComment: modernInstagramRow?.id === 'ig-modern-comment',
+        instagramModernCommentExcludesAuthor: modernInstagramUnit?.text === 'You are vermin and nobody should tolerate you.',
+        instagramModernCommentTargetsText: modernInstagramUnit?.textTarget === 'span',
+        redditHasVisiblePostWrapperAndTwoComments: ['reddit-canonical-wrapper', 't1_kind', 't1_toxic'].every(id => reddit.some(u => u.id === id)),
+        redditDoesNotUseInnerShadowPostAsUnit: !reddit.some(u => u.id === 't3_fixture'),
+        redditTextTargetEscapesUnslottedShadowHost: reddit.some(u => u.id === 'reddit-canonical-wrapper' && u.textTarget !== 'shreddit-post-text-body' && u.textTargetVisible),
+        redditTextShieldRenders,
+        redditSeparatesToxicComment: reddit.some(u => u.id === 't1_toxic' && u.text.includes('Muslims are vermin')),
+        redditFindsHomepageArticle: reddit.some(u => u.id === 'reddit-home-card' && u.text.includes('Homepage post')),
+        redditFindsCommunityFeedTracker: reddit.some(u => u.id === 'reddit-community-card' && u.text.includes('Community post')),
+        redditFindsProfileDescription: reddit.some(u => u.id === 'reddit-profile-description' && u.text.includes('Profile bio')),
+        redditFindsMediaOnlyPost: reddit.some(u => u.id === 'reddit-media-card' && u.images === 1),
+        redditDoesNotDuplicateNestedMedia: reddit.filter(u => u.id === 'reddit-media-card').length === 1
+      };
+      const pass = Object.values(checks).every(Boolean);
+      document.title = `${pass ? 'PASS' : 'FAIL'} SafeScroll social adapters`;
+      document.documentElement.dataset.testStatus = pass ? 'pass' : 'fail';
+      document.getElementById('result').textContent = JSON.stringify({ pass, checks, instagram, reddit }, null, 2);
+    </script>
+  </body>
+</html>

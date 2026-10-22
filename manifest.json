@@ -1,17 +1,16 @@
 {
   "manifest_version": 3,
   "name": "SafeScroll",
-  "version": "0.1.0",
-  "description": "On-device, privacy-first content moderation for Instagram, X/Twitter and YouTube. No user data leaves the browser.",
+  "version": "0.2.0",
+  "description": "On-device, privacy-first content moderation for every website. No user data leaves the browser.",
   "minimum_chrome_version": "109",
   "content_security_policy": {
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
   },
-  "permissions": ["storage", "unlimitedStorage", "offscreen", "alarms"],
+  "permissions": ["storage", "unlimitedStorage", "offscreen", "alarms", "scripting"],
   "host_permissions": [
     "http://*/*",
     "https://*/*",
-    "https://huggingface.co/*",
     "https://tessdata.projectnaptha.com/*"
   ],
   "optional_host_permissions": [],

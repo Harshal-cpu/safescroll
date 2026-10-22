@@ -1,0 +1,69 @@
+<!doctype html>
+<html>
+  <head><meta charset="utf-8"><title>Fixture: forum thread (no &lt;article&gt;, no .g, no [role=article])</title></head>
+  <body style="font-family: system-ui; margin:0">
+    <!-- Deliberately has NOTHING the old genericAdapter matched:
+         no <article>, no [role=article], no div.g, no li.b_algo,
+         no [data-sokoban-container], and no <main><li>. -->
+    <header class="site-header">
+      <h1>Totally Not Reddit</h1>
+      <nav class="navbar"><ul>
+        <li><a href="/">Home</a></li><li><a href="/p">Popular</a></li><li><a href="/new">New</a></li>
+      </ul></nav>
+    </header>
+
+    <div id="thread" class="thread">
+      <h2 class="thread-title">Is this sub toxic?</h2>
+
+      <!-- thread-post x3: the classic repeated-sibling pattern -->
+      <div class="thing" data-fullname="t3_a">
+        <p class="tagline">u/alpha · 3h</p>
+        <div class="entry"><p>First post here, mostly discussing local politics and commute times.</p></div>
+        <ul class="flat-list"><li><a href="#">42 comments</a></li></ul>
+      </div>
+      <div class="thing" data-fullname="t3_b">
+        <p class="tagline">u/bravo · 2h</p>
+        <div class="entry"><p>You are a worthless piece of garbage, nobody would even miss you.</p></div>
+        <ul class="flat-list"><li><a href="#">7 comments</a></li></ul>
+      </div>
+      <div class="thing" data-fullname="t3_c">
+        <p class="tagline">u/charlie · 1h</p>
+        <div class="entry"><p>Muslims are vermin and should be exterminated from this land forever.</p></div>
+        <ul class="flat-list"><li><a href="#">19 comments</a></li></ul>
+      </div>
+
+      <!-- comment list: repeated <li class="comment"> -->
+      <ul id="commentlist" class="comments">
+        <li class="comment" data-id="c1">
+          <div class="entry"><p>That is a really thoughtful and balanced point, thanks for sharing it.</p></div>
+        </li>
+        <li class="comment" data-id="c2">
+          <div class="entry"><p>Immigrants are cockroaches infesting our cities and should be driven out.</p></div>
+        </li>
+        <li class="comment" data-id="c3">
+          <div class="entry"><p>This movie is stupid but the songs were okay, average at best overall.</p></div>
+        </li>
+        <li class="comment" data-id="c4">
+          <div class="entry"><p>I disagree with the framing here, but I see where you are coming from.</p></div>
+        </li>
+      </ul>
+    </div>
+
+    <aside class="sidebar">
+      <div class="widget"><h3>Community rules</h3><p>Be civil. No harassment. Report spam.</p></div>
+    </aside>
+
+    <footer class="site-footer"><p>© 2026 Example Forum. All rights reserved.</p></footer>
+
+    <script>
+      // Late-loading comment (exercises the MutationObserver path).
+      setTimeout(() => {
+        const li = document.createElement('li');
+        li.className = 'comment';
+        li.id = 'late-comment';
+        li.innerHTML = '<div class="entry"><p>Jews control the media and everyone should know the truth about it.</p></div>';
+        document.getElementById('commentlist').appendChild(li);
+      }, 1200);
+    </script>
+  </body>
+</html>

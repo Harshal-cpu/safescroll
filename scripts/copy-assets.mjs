@@ -2,6 +2,7 @@
 // into public/ so they are bundled into dist/ locally. This guarantees:
 //  - tesseract.js worker script + WASM cores are LOCAL (code must never load from CDN)
 //  - nsfwjs weights need NO copy: they load through npm module imports (v4)
+//  - violence/gore ONNX is already pinned under public/models/image-safety/
 // Tesseract .traineddata language files are DATA and may be fetched from
 // tessdata.projectnaptha.com and cached in IndexedDB (see src/offscreen/ocr.js).
 import { cpSync, existsSync, mkdirSync, readdirSync } from 'node:fs';

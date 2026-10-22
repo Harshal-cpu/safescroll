@@ -1,4 +1,5 @@
 import { MSG } from '../shared/messages.js';
+import { MODERATION_DEFAULTS } from '../shared/moderationSettings.js';
 
 const viaOffscreen = async (msg, retries = 2) => {
   // route through background (guarantees offscreen is running first);
@@ -92,7 +93,9 @@ async function renderModelInfo() {
       const state = document.createElement('span');
       state.className = 'badge ' + (m.loadState === 'ready' ? 'ok' : m.loadState === 'failed' ? 'err' : 'warn');
       state.textContent = m.loadState;
-      tr.append(td(m.tier), td(m.model), td(m.params), td(`${m.sizeMB} MB`), td(m.source), state);
+      const stateCell = document.createElement('td');
+      stateCell.appendChild(state);
+      tr.append(td(m.tier), td(m.model), td(m.params), td(`${m.sizeMB} MB`), td(m.source), stateCell);
       tbody.appendChild(tr);
     }
   } catch (e) {
@@ -101,63 +104,54 @@ async function renderModelInfo() {
 }
 renderModelInfo();
 
-// ---------------------------------------------- text tester
-document.getElementById('testBtn').addEventListener('click', async () => {
-  const out = document.getElementById('testResult');
-  const text = document.getElementById('testText').value.trim();
-  if (!text) return;
-  out.innerHTML = '<span class="badge warn">classifying…</span>';
-  try {
-    const resp = await viaOffscreen({ type: 'test-text', text });
-    if (!resp?.ok) throw new Error(resp?.error ?? 'failed');
-    const v = resp.verdict;
-    const score = v?.detail?.score != null ? v.detail.score.toFixed(3) : '?';
-    const cls = v?.action === 'block' ? 'err' : v?.action === 'flag' ? 'warn' : 'ok';
-    const lex = resp.lexicon ? ` · lexicon: ${resp.lexicon.action}` : '';
-    out.innerHTML = `<span class="badge ${cls}">${v?.action}</span> score=${score} (block≥0.9, flag≥0.5)${lex}`;
-  } catch (e) {
-    out.innerHTML = `<span class="badge err">error</span> ${String(e)}`;
-  }
+// ----------------------------------------------------------- master protection
+const enabledDashboardEl = document.getElementById('enabledDashboard');
+chrome.storage.sync.get({ enabled: true }).then(({ enabled }) => {
+  enabledDashboardEl.checked = enabled;
 });
-
-// ---------------------------------------------- thresholds from LIVE PROFILES
-async function renderThresholds() {
-  const tbody = document.querySelector('#thresholds tbody');
-  tbody.textContent = '';
-  try {
-    const resp = await viaOffscreen({ type: MSG.GET_PROFILES });
-    if (!resp?.profiles) throw new Error(resp?.error ?? 'no profiles');
-    flatten(resp.profiles, '').forEach(([path, value]) => {
-      const tr = document.createElement('tr');
-      const td1 = document.createElement('td'); td1.textContent = path;
-      const td2 = document.createElement('td'); td2.textContent = value;
-      tr.append(td1, td2);
-      tbody.appendChild(tr);
-    });
-  } catch (e) {
-    const tr = document.createElement('tr');
-    tr.innerHTML = `<td colspan="3">Failed to load live profiles: ${String(e)}</td>`;
-    tbody.appendChild(tr);
-    console.error('[SafeScroll options]', e);
-  }
-}
-
-function flatten(obj, prefix) {
-  const out = [];
-  for (const [k, v] of Object.entries(obj)) {
-    const path = prefix ? `${prefix}.${k}` : k;
-    if (v && typeof v === 'object' && !Array.isArray(v)) out.push(...flatten(v, path));
-    else out.push([path, String(v)]);
-  }
-  return out;
-}
-renderThresholds();
+enabledDashboardEl.addEventListener('change', async () => {
+  await chrome.storage.sync.set({ enabled: enabledDashboardEl.checked });
+});
 
 // ------------------------------------------------------------------ scope
 const scopeEl = document.getElementById('scope');
 chrome.storage.sync.get({ scope: 'all' }).then(({ scope }) => { scopeEl.value = scope; });
 scopeEl.addEventListener('change', async () => {
   await chrome.storage.sync.set({ scope: scopeEl.value });
+});
+
+// ------------------------------------------------------------- paused sites
+// Mirrors content/sitecontrol.js. Options page cannot message every tab, so it
+// reads/writes storage directly; the content script reacts via onChanged.
+async function renderPausedSites() {
+  const tbody = document.querySelector('#pausedSites tbody');
+  const { pausedHosts = [] } = await chrome.storage.sync.get({ pausedHosts: [] });
+  tbody.textContent = '';
+  const hosts = Array.isArray(pausedHosts) ? pausedHosts : [];
+  document.getElementById('pausedEmpty').style.display = hosts.length ? 'none' : 'block';
+  for (const host of hosts) {
+    const tr = document.createElement('tr');
+    const td1 = document.createElement('td');
+    td1.textContent = host;
+    const td2 = document.createElement('td');
+    const btn = document.createElement('button');
+    btn.className = 'button danger';
+    btn.textContent = 'Resume';
+    btn.addEventListener('click', async () => {
+      const { pausedHosts: cur = [] } = await chrome.storage.sync.get({ pausedHosts: [] });
+      await chrome.storage.sync.set({ pausedHosts: cur.filter(h => h !== host) });
+      renderPausedSites();
+    });
+    td2.appendChild(btn);
+    tr.append(td1, td2);
+    tbody.appendChild(tr);
+  }
+}
+renderPausedSites();
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== 'sync') return;
+  if (changes.pausedHosts) renderPausedSites();
+  if (changes.enabled) enabledDashboardEl.checked = !!changes.enabled.newValue;
 });
 
 // ------------------------------------------------------------------ Scroll Lock
@@ -174,9 +168,10 @@ scrollLockEl.addEventListener('change', async () => {
 // ------------------------------------------------------------------ Child Lock
 async function renderChildState() {
   const { childMode } = await chrome.storage.sync.get({ childMode: {} });
-  document.getElementById('childState').innerHTML = childMode?.enabled && childMode?.pinHash
-    ? 'State: <strong style="color:#7ee787">ACTIVE</strong> — overrides require the parent PIN.'
-    : 'State: <strong>off</strong> — set a PIN to activate.';
+  const state = document.getElementById('childState');
+  const active = !!(childMode?.enabled && childMode?.pinHash);
+  state.textContent = active ? 'Active' : 'Off';
+  state.className = `status-text${active ? ' active' : ''}`;
 }
 renderChildState();
 
@@ -216,21 +211,28 @@ blockMildEl.addEventListener('change', async () => {
   await chrome.storage.sync.set({ childMode: { ...childMode, blockMild: blockMildEl.checked } });
 });
 
-// ------------------------------------------------------------------ export buttons
-function download(content, filename, mime) {
-  const url = URL.createObjectURL(new Blob([content], { type: mime }));
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+// ------------------------------------------------------------ performance toggles
+// The background relays these stored settings to the offscreen document.
+for (const [id, key, dflt] of [
+  ['ocrEnabled', 'ocrEnabled', MODERATION_DEFAULTS.ocrEnabled],
+  ['imageEnabled', 'imageEnabled', MODERATION_DEFAULTS.imageEnabled]
+]) {
+  const el = document.getElementById(id);
+  chrome.storage.sync.get({ [key]: dflt }).then(v => { el.checked = !!v[key]; });
+  el.addEventListener('change', async () => {
+    await chrome.storage.sync.set({ [key]: el.checked });
+  });
 }
 
-document.getElementById('exportJson').addEventListener('click', async () => {
-  const r = await viaOffscreen({ type: MSG.EXPORT_FEEDBACK, format: 'json' });
-  if (r?.content) download(r.content, r.filename, r.mime);
-});
-document.getElementById('exportCsv').addEventListener('click', async () => {
-  const r = await viaOffscreen({ type: MSG.EXPORT_FEEDBACK, format: 'csv' });
-  if (r?.content) download(r.content, r.filename, r.mime);
+// ------------------------------------------------------------ clear cache
+document.getElementById('clearCache').addEventListener('click', async () => {
+  const out = document.getElementById('clearCacheResult');
+  out.textContent = 'clearing…';
+  try {
+    const r = await viaOffscreen({ type: MSG.CLEAR_VERDICT_CACHE });
+    out.textContent = r?.ok ? 'Cache cleared.' : `Failed: ${r?.error ?? 'no response'}`;
+    if (r?.ok) renderStats();
+  } catch (e) {
+    out.textContent = `Failed: ${e}`;
+  }
 });
