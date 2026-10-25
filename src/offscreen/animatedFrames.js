@@ -1,6 +1,8 @@
-import { fetchImageBlob } from './imageSource.js';
+import { createImageSourceReader } from './imageSource.js';
 
 const MAX_GIF_BYTES = 12 * 1024 * 1024;
+const gifSource = createImageSourceReader();
+const GIF_FETCH_OPTIONS = { budgetMs: 10_000, attemptMs: 5_000 };
 
 // Decode a few actual animation frames. Browsers normally expose only the
 // current (often first) GIF frame through an <img> canvas draw.
@@ -12,7 +14,7 @@ export function gifFrameIndexes(count) {
 export async function* decodeGifFrames(url, referer = null) {
   if (typeof ImageDecoder === 'undefined' || !(await ImageDecoder.isTypeSupported('image/gif'))) return;
   const blob = url.startsWith('data:image/gif') ? await (await fetch(url)).blob()
-    : await fetchImageBlob(url, referer);
+    : await gifSource.read(url, referer, GIF_FETCH_OPTIONS);
   if (!blob.size || blob.size > MAX_GIF_BYTES) return;
   const decoder = new ImageDecoder({ data: await blob.arrayBuffer(), type: 'image/gif' });
   try {

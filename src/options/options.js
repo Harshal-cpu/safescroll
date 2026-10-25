@@ -20,6 +20,7 @@ async function renderStats() {
     if (!resp?.ok) throw new Error(resp?.error ?? 'unavailable');
     document.getElementById('statBlocked').textContent = resp.blocked;
     document.getElementById('statFlagged').textContent = resp.flagged;
+    document.getElementById('statClean').textContent = resp.clean;
     document.getElementById('statTotal').textContent = resp.total;
 
     const tbody = document.querySelector('#statsBySource tbody');
@@ -42,28 +43,32 @@ async function renderStats() {
     console.error('[SafeScroll options] stats:', e);
     document.getElementById('statTotal').textContent = 'unavailable';
     // cold-start race: offscreen IndexedDB may not be ready — retry shortly
-    setTimeout(() => renderStats(), 2500);
+    setTimeout(refreshActivity, 2500);
   }
 }
-renderStats();
 
 // ---------------------------------------------- recent verdicts
+const activityClock = new Intl.DateTimeFormat(undefined, {
+  hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true
+});
 async function renderRecent() {
   const tbody = document.querySelector('#recentVerdicts tbody');
-  tbody.textContent = '';
   try {
     const resp = await viaOffscreen({ type: 'get-recent-verdicts' });
     if (!resp?.ok) throw new Error(resp?.error ?? 'unavailable');
+    tbody.textContent = '';
     if (!resp.rows.length) {
       tbody.innerHTML = '<tr><td>No verdicts yet.</td></tr>';
       return;
     }
     for (const row of resp.rows) {
       const tr = document.createElement('tr');
-      const time = new Date(row.ts).toLocaleTimeString();
+      const occurredAt = new Date(row.ts);
+      const time = activityClock.format(occurredAt);
       const action = row.verdict?.action ?? '?';
       const sources = (row.verdict?.reasons ?? []).map(r => r.source).join(', ') || '—';
       const td1 = document.createElement('td'); td1.textContent = time;
+      td1.title = occurredAt.toString();
       const td2 = document.createElement('td');
       const badge = document.createElement('span');
       badge.className = 'badge ' + (action === 'block' ? 'err' : action === 'flag' ? 'warn' : 'ok');
@@ -75,10 +80,32 @@ async function renderRecent() {
     }
   } catch (e) {
     tbody.innerHTML = `<tr><td>History unavailable: ${String(e)} — retrying…</td></tr>`;
-    setTimeout(() => renderRecent(), 2500);
+    setTimeout(refreshActivity, 2500);
   }
 }
-renderRecent();
+
+let activityRefreshRunning = false;
+let activityRefreshQueued = false;
+async function refreshActivity() {
+  if (activityRefreshRunning) {
+    activityRefreshQueued = true;
+    return;
+  }
+  activityRefreshRunning = true;
+  do {
+    activityRefreshQueued = false;
+    await renderRecent();
+    await renderStats();
+  } while (activityRefreshQueued);
+  activityRefreshRunning = false;
+}
+refreshActivity();
+chrome.runtime.onMessage.addListener(msg => {
+  if (msg?.type === MSG.VERDICTS_UPDATED) refreshActivity();
+});
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) refreshActivity();
+});
 
 // ---------------------------------------------- model information
 async function renderModelInfo() {
@@ -231,7 +258,7 @@ document.getElementById('clearCache').addEventListener('click', async () => {
   try {
     const r = await viaOffscreen({ type: MSG.CLEAR_VERDICT_CACHE });
     out.textContent = r?.ok ? 'Cache cleared.' : `Failed: ${r?.error ?? 'no response'}`;
-    if (r?.ok) renderStats();
+    if (r?.ok) refreshActivity();
   } catch (e) {
     out.textContent = `Failed: ${e}`;
   }

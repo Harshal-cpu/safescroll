@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>SafeScroll YouTube shields</title>
+<style>
+  body { margin: 24px; font: 16px/1.4 Arial, sans-serif; }
+  main { max-width: 700px; }
+  ytd-rich-item-renderer, ytd-comment-thread-renderer, ytd-comment-view-model,
+  ytd-watch-metadata, ytd-post-renderer, yt-lockup-view-model, ytm-rich-item-renderer,
+  ytm-video-with-context-renderer, ytm-comment-renderer { display: block; }
+  ytd-rich-item-renderer, ytd-comment-thread-renderer, ytd-watch-metadata,
+  ytd-post-renderer, ytm-rich-item-renderer, ytm-comment-renderer {
+    margin: 12px 0; padding: 12px; border: 1px solid #ccc; border-radius: 8px;
+  }
+  ytd-thumbnail, ytm-thumbnail { display: block; width: 320px; height: 180px; }
+  ytd-thumbnail img, ytm-thumbnail img { display: block; width: 100%; height: 100%; object-fit: cover; }
+  yt-formatted-string, yt-attributed-string { display: inline; }
+  a { color: inherit; }
+  pre { white-space: pre-wrap; }
+</style>
+<main>
+  <ytd-rich-item-renderer id="desktop-card">
+    <ytd-thumbnail><a id="thumbnail" href="/watch?v=abc123"><img src="/test/meme-toxic.jpg" width="320" height="180" alt="Video thumbnail"></a></ytd-thumbnail>
+    <a id="video-title-link" href="/watch?v=abc123"><yt-formatted-string id="video-title">You are worthless and nobody wants you here</yt-formatted-string></a>
+    <div>1 million views · Channel name</div>
+  </ytd-rich-item-renderer>
+  <ytd-rich-item-renderer id="modern-card-shell">
+    <yt-lockup-view-model id="modern-card">
+      <a href="/watch?v=modern"><img src="/test/meme-toxic.jpg" width="160" height="90" alt="Modern thumbnail"></a>
+      <h3 class="yt-lockup-metadata-view-model__title">Modern toxic video title</h3>
+    </yt-lockup-view-model>
+  </ytd-rich-item-renderer>
+  <ytd-comment-thread-renderer id="desktop-thread">
+    <ytd-comment-view-model id="desktop-comment" comment-id="comment-1">
+      <a href="/channel/example">Comment author</a>
+      <yt-attributed-string id="content-text">Kill yourself</yt-attributed-string>
+      <button>Reply</button>
+    </ytd-comment-view-model>
+  </ytd-comment-thread-renderer>
+  <ytd-watch-metadata id="watch">
+    <h1><yt-formatted-string>Quiet video title</yt-formatted-string></h1>
+    <div id="description-inner"><yt-attributed-string>You are vermin and should leave this community.</yt-attributed-string></div>
+  </ytd-watch-metadata>
+  <ytd-post-renderer id="community-post">
+    <a href="/channel/example">Post author</a>
+    <yt-formatted-string id="content-text">Immigrants are cockroaches and should be driven out.</yt-formatted-string>
+  </ytd-post-renderer>
+  <ytm-rich-item-renderer id="mobile-card">
+    <ytm-video-with-context-renderer id="mobile-video">
+      <ytm-thumbnail><img src="/test/meme-toxic.jpg" width="320" height="180" alt="Mobile thumbnail"></ytm-thumbnail>
+      <h3>Mobile toxic video title</h3>
+    </ytm-video-with-context-renderer>
+  </ytm-rich-item-renderer>
+  <ytm-comment-renderer id="mobile-comment">
+    <span class="comment-text">Mobile comment says kill yourself</span>
+  </ytm-comment-renderer>
+  <pre id="result">Running…</pre>
+</main>
+<script type="module">
+  import { materialise, youtubeAdapter } from '../src/content/adapters.js';
+  import { createBlurShield } from '../src/content/shield.js';
+
+  await Promise.all([...document.images].map(image => image.decode().catch(() => {})));
+  const roots = youtubeAdapter.units(document);
+  const unit = id => materialise(document.getElementById(id), youtubeAdapter);
+  const card = unit('desktop-card');
+  const comment = unit('desktop-comment');
+  const post = unit('community-post');
+  const mobile = unit('mobile-video');
+  const modern = unit('modern-card');
+  const watchParts = roots.filter(el => document.getElementById('watch').contains(el));
+  const thumbnail = youtubeAdapter.mediaEl(card);
+  const before = thumbnail.getBoundingClientRect();
+  const nextBefore = document.getElementById('desktop-thread').getBoundingClientRect().top;
+
+  const mediaShield = createBlurShield(youtubeAdapter.mediaTarget(card.images[0], card),
+    { target: 'media', siteId: 'youtube' });
+  mediaShield.update({ action: 'block', reasons: [{ source: 'ocr-text', action: 'block' }] });
+  const mediaRect = mediaShield.getBoundingClientRect();
+  const mediaVeil = Number(getComputedStyle(mediaShield).backgroundColor.match(/[\d.]+(?=\))/)?.[0] ?? 0);
+  const mediaBlur = getComputedStyle(mediaShield).backdropFilter;
+
+  const textShield = createBlurShield(youtubeAdapter.textEl(comment),
+    { target: 'text', siteId: 'youtube' });
+  textShield.update({ action: 'block', reasons: [{ source: 'lexicon', action: 'block' }] });
+  const fragments = [...textShield.querySelectorAll('[data-safescroll-fragment]')];
+  const fragmentVeil = Number(getComputedStyle(fragments[0]).backgroundColor.match(/[\d.]+(?=\))/)?.[0] ?? 0);
+  const flaggedShield = createBlurShield(youtubeAdapter.textEl(modern),
+    { target: 'text', siteId: 'youtube' });
+  flaggedShield.update({ action: 'flag', reasons: [{ source: 'text', action: 'flag' }] });
+  const flagVeil = Number(getComputedStyle(flaggedShield).backgroundColor.match(/[\d.]+(?=\))/)?.[0] ?? 0);
+  const extraShields = [
+    [youtubeAdapter.textEl(card), 'text'],
+    [youtubeAdapter.mediaEl(modern), 'media'],
+    [watchParts[1], 'text'],
+    [youtubeAdapter.textEl(post), 'text'],
+    [youtubeAdapter.mediaEl(mobile), 'media'],
+    [youtubeAdapter.textEl(mobile), 'text'],
+    [document.querySelector('#mobile-comment .comment-text'), 'text']
+  ].map(([target, kind]) => {
+    const shield = createBlurShield(target, { target: kind, siteId: 'youtube' });
+    shield?.update({ action: 'block', reasons: [{ source: kind === 'media' ? 'ocr-text' : 'text', action: 'block' }] });
+    return shield;
+  });
+  await new Promise(requestAnimationFrame);
+  await new Promise(requestAnimationFrame);
+  const commentRow = document.getElementById('desktop-thread').getBoundingClientRect();
+  const modernMediaRect = extraShields[1].getBoundingClientRect();
+  const modernImageRect = modern.images[0].el.getBoundingClientRect();
+  const commentHost = youtubeAdapter.textEl(comment).getBoundingClientRect();
+  const commentPill = textShield.querySelector('button').parentElement.parentElement.getBoundingClientRect();
+
+  const checks = {
+    desktopCardAndCommentDetected: roots.includes(card.el) && roots.includes(comment.el),
+    commentThreadNotDuplicated: !roots.includes(document.getElementById('desktop-thread')),
+    shortCommentClassified: comment.text === 'Kill yourself' && comment.minChars === 4,
+    commentTargetsOnlyItsText: youtubeAdapter.textEl(comment).id === 'content-text',
+    titleExcludesMetadata: card.text === 'You are worthless and nobody wants you here',
+    titleTargetsVisibleText: youtubeAdapter.textEl(card).id === 'video-title',
+    watchTitleAndDescriptionSeparate: roots.filter(el => document.getElementById('watch').contains(el)).length === 2,
+    communityPostTextOnly: post.text === 'Immigrants are cockroaches and should be driven out.',
+    desktopThumbnailExtracted: card.images.length === 1 && card.images[0].dataUrl === null,
+    desktopThumbnailTargeted: thumbnail?.localName === 'ytd-thumbnail',
+    mobileCardDetectedOnce: roots.includes(mobile.el) && !roots.includes(document.getElementById('mobile-card')),
+    mobileCommentDetected: roots.includes(document.getElementById('mobile-comment')),
+    mobileThumbnailExtracted: mobile.images.length === 1,
+    modernCardDetectedOnce: roots.includes(modern.el) && !roots.includes(document.getElementById('modern-card-shell')),
+    compactThumbnailExtracted: modern.images.length === 1 && youtubeAdapter.mediaEl(modern)?.contains(modern.images[0].el),
+    compactThumbnailFullyCovered: modernMediaRect.width >= modernImageRect.width - 1 &&
+      modernMediaRect.height >= modernImageRect.height - 1,
+    shieldCopyNotReclassified: unit('modern-card').text === modern.text,
+    mediaShieldCoversThumbnail: mediaRect.width >= before.width - 1 && mediaRect.height >= before.height - 1,
+    mediaBlurIsStrong: mediaBlur.includes('22px') && mediaVeil >= 0.6,
+    inlineCommentCovered: fragments.length >= 1 && fragmentVeil >= 0.6,
+    flaggedTextUnreadable: getComputedStyle(flaggedShield).backdropFilter.includes('18px') && flagVeil >= 0.6,
+    otherTextAndMediaShielded: extraShields.every(shield => shield?.isConnected && shield.style.display !== 'none'),
+    inlinePillTracksLayout: commentPill.top >= commentRow.top - 1 && commentPill.bottom <= commentRow.bottom + 1,
+    layoutUnchanged: Math.abs(document.getElementById('desktop-thread').getBoundingClientRect().top - nextBefore) < 1
+  };
+  const pass = Object.values(checks).every(Boolean);
+  document.documentElement.dataset.testStatus = pass ? 'pass' : 'fail';
+  document.getElementById('result').textContent = JSON.stringify({ pass, checks,
+    commentLayout: { rowTop: commentRow.top, rowBottom: commentRow.bottom,
+      hostTop: commentHost.top, hostBottom: commentHost.bottom,
+      pillTop: commentPill.top, pillBottom: commentPill.bottom,
+      pillCssTop: textShield.querySelector('button').parentElement.parentElement.style.top } }, null, 2);
+</script>
+</html>

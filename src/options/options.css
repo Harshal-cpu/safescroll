@@ -83,7 +83,7 @@ p { margin-bottom: 0; color: var(--muted); font-size: 12px; }
 .switch input:checked + .switch-track::after { transform: translateX(20px); }
 .switch input:focus-visible + .switch-track { outline: 2px solid var(--accent); outline-offset: 3px; }
 
-.stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 16px; }
+.stats-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-bottom: 16px; }
 .stat-card { display: flex; min-height: 104px; align-items: center; gap: 14px; padding: 18px; border: 1px solid var(--line); border-radius: 17px; background: linear-gradient(145deg, rgba(255,255,255,.025), rgba(17,22,30,.92)); box-shadow: 0 16px 45px rgba(0,0,0,.12); transition: transform 160ms ease, border-color 160ms ease; }
 .stat-card:hover { transform: translateY(-3px); border-color: var(--line-strong); }
 .stat-card > div { display: grid; }
@@ -93,6 +93,7 @@ p { margin-bottom: 0; color: var(--muted); font-size: 12px; }
 .stat-card.danger .stat-symbol { color: #ff9ca5; background: rgba(255,123,134,.09); }
 .stat-card.warning .stat-symbol { color: var(--warning); background: rgba(255,192,107,.09); }
 .stat-card.accent .stat-symbol { color: var(--accent); background: rgba(102,227,164,.09); }
+.stat-card.neutral .stat-symbol { color: var(--muted); background: rgba(142,154,170,.09); }
 
 .card { padding: 20px; border: 1px solid var(--line); border-radius: 18px; background: rgba(17,22,30,.88); box-shadow: 0 16px 48px rgba(0,0,0,.12); scroll-margin-top: 22px; }
 .overview-grid { display: grid; grid-template-columns: minmax(260px, .72fr) minmax(460px, 1.5fr); gap: 16px; margin-bottom: 16px; }
@@ -157,6 +158,10 @@ select:focus, input[type="password"]:focus { border-color: rgba(102,227,164,.55)
   .sidebar nav, .privacy-card { display: none; }
   .dashboard-main { padding: 28px 20px; }
   .overview-grid, .settings-grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 1120px) and (min-width: 621px) {
+  .stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 620px) {

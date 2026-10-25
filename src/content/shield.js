@@ -2,7 +2,7 @@
 // the text container and media container of a post are blurred SEPARATELY
 // (toxic text blurs only the text; NSFW image blurs only the image).
 // States: loading / blocked / flagged. "Show anyway" is PIN-gated in Child
-// Mode via meta.overrideGuard; "Report wrong verdict" feeds the corpus.
+// Mode via meta.overrideGuard.
 //
 // OPEN-WEB SAFETY RULES added here:
 //  * Never attach to <html>, <body> or anything covering the whole viewport —
@@ -61,9 +61,16 @@ function attachShield(host, meta = {}) {
   // An absolutely positioned child of a wrapping inline span uses the span's
   // fragmented containing block, which can cover only part of an IG comment.
   // Render one overlay per line fragment without changing the page's text flow.
+  const strongCover = meta.siteId === 'youtube' || meta.siteId === 'instagram';
+  const inlineMediaImage = strongCover && meta.target === 'media' &&
+    getComputedStyle(host).display === 'inline' ? host.querySelector?.('img') : null;
+  const fixedMediaTarget = inlineMediaImage ||
+    (strongCover && meta.target === 'media' && host.tagName === 'VIDEO' ? host : null);
+  const fixedMediaHost = !!fixedMediaTarget;
   const inlineTextHost = meta.target === 'text' && getComputedStyle(host).display === 'inline';
   const fragments = [];
   let fragmentBlur = 'blur(14px)';
+  let fragmentVeil = 'rgba(255,255,255,0.06)';
   const shield = document.createElement('div');
   shield.className = 'safescroll-shield';
   shield.dataset.safescroll = 'shield';
@@ -89,6 +96,9 @@ function attachShield(host, meta = {}) {
     position: 'fixed', inset: 'auto', top: '0', left: '0', width: '0', height: '0',
     background: 'none', backdropFilter: 'none', WebkitBackdropFilter: 'none',
     pointerEvents: 'none', overflow: 'visible'
+  });
+  if (fixedMediaHost) Object.assign(shield.style, {
+    position: 'fixed', inset: 'auto', top: '0', left: '0', width: '0', height: '0'
   });
 
   const pill = document.createElement('div');
@@ -125,7 +135,11 @@ function attachShield(host, meta = {}) {
   overrideBtn.title = 'Show content anyway';
   overrideBtn.textContent = 'Show anyway';
   overrideBtn.style.cssText = btnStyle;
-  overrideBtn.addEventListener('click', async () => {
+  overrideBtn.addEventListener('click', async event => {
+    // YouTube titles and thumbnails are links. The button may be rendered
+    // inside one of them, but revealing content must never open the video.
+    event.preventDefault();
+    event.stopPropagation();
     overrideBtn.disabled = true;
     overrideBtn.textContent = '…';
     let approved = true;
@@ -144,23 +158,7 @@ function attachShield(host, meta = {}) {
     }
   });
 
-  const reportBtn = document.createElement('button');
-  reportBtn.type = 'button';
-  reportBtn.setAttribute('aria-label', 'Report an incorrect SafeScroll verdict');
-  reportBtn.title = 'Report wrong verdict';
-  reportBtn.textContent = 'Report wrong verdict';
-  reportBtn.style.cssText = btnStyle;
-  let wasReported = false;
-  reportBtn.addEventListener('click', () => {
-    import('./bridge.js').then(({ reportFeedback }) =>
-      reportFeedback({ key: meta.key, verdictAction: shield.dataset.verdictAction, expectedAction: 'clean', siteId: meta.siteId })
-    );
-    wasReported = true;
-    reportBtn.textContent = 'Reported ✓';
-    reportBtn.disabled = true;
-  });
-
-  btnRow.append(overrideBtn, reportBtn);
+  btnRow.append(overrideBtn);
   pill.append(title, status, reason, btnRow);
   shield.appendChild(pill);
 
@@ -191,14 +189,16 @@ function attachShield(host, meta = {}) {
       : layoutMode === 'compact' ? short
         : layoutMode === 'micro' ? micro : tiny;
     overrideBtn.textContent = layoutMode === 'full' ? 'Show anyway' : 'Show';
-    reportBtn.textContent = wasReported ? 'Reported ✓'
-      : layoutMode === 'full' ? 'Report wrong verdict' : 'Report';
   }
 
   function applyResponsiveLayout() {
     layoutFrame = 0;
     if (!shield.isConnected) return;
-    const rect = host.getBoundingClientRect();
+    const rect = fixedMediaTarget?.getBoundingClientRect() ?? host.getBoundingClientRect();
+    if (fixedMediaHost) Object.assign(shield.style, {
+      left: `${rect.left}px`, top: `${rect.top}px`,
+      width: `${rect.width}px`, height: `${rect.height}px`
+    });
     const hostWidth = rect.width || host.clientWidth;
     const hostHeight = rect.height || host.clientHeight;
     layoutMode = shieldLayoutForSize(hostWidth, hostHeight);
@@ -229,22 +229,18 @@ function attachShield(host, meta = {}) {
     btnRow.style.display = loading ? 'none' : 'flex';
     btnRow.style.gap = full ? '8px' : compact ? '5px' : '3px';
     btnRow.style.marginTop = full ? '4px' : '0';
-    reportBtn.style.display = full || compact ? 'inline-block' : 'none';
-
-    for (const button of [overrideBtn, reportBtn]) {
-      button.style.padding = full ? '5px 12px' : compact ? '3px 8px' : tiny ? '1px 4px' : '2px 6px';
-      button.style.fontSize = full ? '11px' : compact ? '10px' : tiny ? '9px' : '10px';
-      button.style.lineHeight = tiny ? '1.1' : '1.25';
-      button.style.minHeight = full ? 'auto' : compact ? '24px' : tiny ? '18px' : '22px';
-      button.style.flex = '0 0 auto';
-    }
+    overrideBtn.style.padding = full ? '5px 12px' : compact ? '3px 8px' : tiny ? '1px 4px' : '2px 6px';
+    overrideBtn.style.fontSize = full ? '11px' : compact ? '10px' : tiny ? '9px' : '10px';
+    overrideBtn.style.lineHeight = tiny ? '1.1' : '1.25';
+    overrideBtn.style.minHeight = full ? 'auto' : compact ? '24px' : tiny ? '18px' : '22px';
+    overrideBtn.style.flex = '0 0 auto';
     if (inlineTextHost) {
       const rects = [...host.getClientRects()].filter(r => r.width && r.height);
       while (fragments.length < rects.length) {
         const fragment = document.createElement('div');
         fragment.dataset.safescrollFragment = '1';
         Object.assign(fragment.style, {
-          position: 'absolute', background: 'rgba(255,255,255,0.06)',
+          position: 'absolute', background: fragmentVeil,
           borderRadius: '4px', pointerEvents: 'auto'
         });
         shield.insertBefore(fragment, pill);
@@ -257,6 +253,7 @@ function attachShield(host, meta = {}) {
         Object.assign(fragment.style, {
           left: `${r.left}px`, top: `${r.top}px`,
           width: `${r.width}px`, height: `${r.height}px`,
+          background: fragmentVeil,
           backdropFilter: fragmentBlur, WebkitBackdropFilter: fragmentBlur
         });
       });
@@ -264,7 +261,9 @@ function attachShield(host, meta = {}) {
         position: 'absolute', pointerEvents: 'auto', width: 'auto',
         maxWidth: 'min(320px, calc(100vw - 20px))', maxHeight: 'none',
         left: `${Math.max(10, Math.min(window.innerWidth - 10, rect.left + rect.width / 2))}px`,
-        top: `${Math.max(10, Math.min(window.innerHeight - 10, rect.top + rect.height / 2))}px`,
+        // Keep the control with its text. Clamping an off-screen comment to
+        // the viewport edge covers unrelated YouTube cards while it is hidden.
+        top: `${rect.top + rect.height / 2}px`,
         transform: 'translate(-50%, -50%)'
       });
     }
@@ -279,13 +278,15 @@ function attachShield(host, meta = {}) {
   const resizeObserver = typeof ResizeObserver === 'function'
     ? new ResizeObserver(scheduleLayout)
     : null;
-  if (resizeObserver) resizeObserver.observe(inlineTextHost ? host.parentElement : host);
-  if (inlineTextHost || !resizeObserver) window.addEventListener('resize', scheduleLayout, { passive: true });
-  if (inlineTextHost) window.addEventListener('scroll', scheduleLayout, { passive: true, capture: true });
+  if (resizeObserver) resizeObserver.observe(inlineTextHost ? host.parentElement : fixedMediaTarget ?? host);
+  if (inlineTextHost || fixedMediaHost || !resizeObserver) window.addEventListener('resize', scheduleLayout, { passive: true });
+  if (inlineTextHost || fixedMediaHost) window.addEventListener('scroll', scheduleLayout, { passive: true, capture: true });
 
-  function setBlur(value) {
+  function setBlur(value, veil) {
     fragmentBlur = value;
+    fragmentVeil = veil;
     if (!inlineTextHost) {
+      shield.style.background = veil;
       shield.style.backdropFilter = value;
       shield.style.WebkitBackdropFilter = value;
     }
@@ -298,22 +299,28 @@ function attachShield(host, meta = {}) {
       shield.style.display = 'none';
       return;
     }
+    if (shield.dataset.userOverrode === '1') {
+      shield.style.display = 'none';
+      return;
+    }
     shield.style.display = 'flex';
     const reasons = (verdict.reasons || []).map(r => `${r.source}: ${r.action}`).join(' · ');
     if (verdict.action === 'block') {
       status.textContent = '🛑 Toxic content blurred';
       reason.textContent = reasons;
       pill.style.background = 'rgba(120,10,10,0.8)';
-      setBlur('blur(18px)');
+      setBlur(strongCover ? 'blur(22px)' : 'blur(18px)',
+        strongCover ? 'rgba(12,14,18,0.68)' : 'rgba(255,255,255,0.06)');
     } else if (verdict.action === 'flag') {
       status.textContent = '⚠️ Low-severity content blurred';
       reason.textContent = reasons;
       pill.style.background = 'rgba(120,90,10,0.75)';
-      setBlur('blur(8px)');
+      setBlur(strongCover ? 'blur(18px)' : 'blur(8px)',
+        strongCover ? 'rgba(12,14,18,0.60)' : 'rgba(255,255,255,0.06)');
     } else if (verdict.action === 'loading') {
       reason.textContent = '';
       pill.style.background = 'rgba(10,10,14,0.72)';
-      setBlur('blur(6px)');
+      setBlur('blur(6px)', strongCover ? 'rgba(12,14,18,0.26)' : 'rgba(255,255,255,0.06)');
     }
     applyResponsiveLayout();
   };
@@ -325,8 +332,8 @@ function attachShield(host, meta = {}) {
 
   shield.destroy = () => {
     resizeObserver?.disconnect();
-    if (inlineTextHost || !resizeObserver) window.removeEventListener('resize', scheduleLayout);
-    if (inlineTextHost) window.removeEventListener('scroll', scheduleLayout, true);
+    if (inlineTextHost || fixedMediaHost || !resizeObserver) window.removeEventListener('resize', scheduleLayout);
+    if (inlineTextHost || fixedMediaHost) window.removeEventListener('scroll', scheduleLayout, true);
     if (layoutFrame) cancelAnimationFrame(layoutFrame);
     shield.remove();
     // Restore the host's original inline position — never leave our mutation
@@ -339,11 +346,11 @@ function attachShield(host, meta = {}) {
     }
   };
 
-  if (!inlineTextHost && getComputedStyle(host).position === 'static') {
+  if (!inlineTextHost && !fixedMediaHost && getComputedStyle(host).position === 'static') {
     host.dataset.safescrollPrevPosition = host.style.position || '';
     host.style.position = 'relative';
   }
-  (inlineTextHost ? document.documentElement : host).appendChild(shield);
+  (inlineTextHost || fixedMediaHost ? document.documentElement : host).appendChild(shield);
   applyResponsiveLayout();
   return shield;
 }

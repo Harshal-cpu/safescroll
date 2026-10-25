@@ -34,5 +34,15 @@
       "all_frames": false
     }
   ],
-  "web_accessible_resources": []
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "assets/content.js-*.js",
+        "assets/messages-*.js",
+        "assets/mediaFingerprint-*.js",
+        "assets/profiles-*.js"
+      ],
+      "matches": ["http://*/*", "https://*/*"]
+    }
+  ]
 }

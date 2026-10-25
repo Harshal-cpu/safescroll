@@ -15,7 +15,7 @@ import {
   classify, waitForModels, sendRuntimeMessage, onExtensionContextInvalidated
 } from './bridge.js';
 import { splitUnit } from './extract.js';
-import { lockIfConfigured, getSettings, sha256hex } from './lockscreen.js';
+import { lockIfConfigured, isScrollLocked, unlock, getSettings, sha256hex } from './lockscreen.js';
 import { isHostPaused, toggleHostPause } from './sitecontrol.js';
 import { MSG } from '../shared/messages.js';
 import { lexiconCheck } from '../shared/lexicon.js';
@@ -42,9 +42,13 @@ const inFlight = new Set();
 const queue = [];
 const unitMemo = new WeakMap(); // Element -> materialised unit (for granular targets)
 
-let enabled = true;
+let enabled = false; // stay idle until the saved master-switch state arrives
 let scope = 'all'; // 'all' = every website (default) | 'core' = IG/X/Reddit/YT
 let paused = false;
+let pausedHosts = [];
+let settingsRevision = 0;
+let domReady = false;
+let scanning = false;
 let destroyed = false;
 let scheduled = false;
 let debounceTimer = null;
@@ -72,8 +76,10 @@ function applyModerationSettings(next) {
   clearAll();
   queue.length = 0;
   mediaRequested.clear();
-  pendingRoots.add(document.body || document.documentElement);
-  scheduleScan(0);
+  if (isActive()) {
+    pendingRoots.add(document.body || document.documentElement);
+    scheduleScan(0);
+  }
 }
 
 const CORE_HOSTS = /instagram\.|twitter\.|reddit\.|youtube\.|googlevideo\.|(^|\.)x\.com$/;
@@ -86,22 +92,23 @@ function isActive() {
 }
 
 // ------------------------------------------------------------------- settings
-function applySettings({ enabled: e, scope: s, pausedHosts }) {
-  enabled = e;
+function applySettings({ enabled: e, scope: s, pausedHosts: hosts }) {
+  enabled = !!e;
   scope = s;
+  pausedHosts = Array.isArray(hosts) ? hosts : [];
   paused = isHostPaused(pausedHosts, location.hostname);
   if (!isActive()) {
-    animatedScanner.reset();
-    hideAllShields();
+    suspendScanning();
     return;
   }
+  if (!scanning) { resumeScanning(); return; }
   prune();
   pendingRoots.add(document.body || document.documentElement);
   scheduleScan(0);
 }
 
 chrome.storage.sync.get({ enabled: true, scope: 'all', pausedHosts: [] })
-  .then(applySettings)
+  .then(settings => { if (!settingsRevision) applySettings(settings); })
   .catch(e => console.error('[SafeScroll] settings read failed:', e));
 
 chrome.storage.onChanged.addListener((changes, area) => {
@@ -114,18 +121,17 @@ chrome.storage.onChanged.addListener((changes, area) => {
     });
   }
   if (!changes.enabled && !changes.scope && !changes.pausedHosts) return;
-  const next = {
+  const revision = ++settingsRevision;
+  applySettings({
     enabled: changes.enabled ? changes.enabled.newValue : enabled,
-    scope: changes.scope ? changes.scope.newValue : scope
-  };
-  if (changes.pausedHosts) {
-    applySettings({ ...next, pausedHosts: changes.pausedHosts.newValue });
-    return;
-  }
-  // `enabled`/`scope` changed but the pause list wasn't in the payload — re-read.
-  chrome.storage.sync.get({ pausedHosts: [] })
-    .then(p => applySettings({ ...next, pausedHosts: p.pausedHosts }))
-    .catch(() => applySettings({ ...next, pausedHosts: [] }));
+    scope: changes.scope ? changes.scope.newValue : scope,
+    pausedHosts: changes.pausedHosts ? changes.pausedHosts.newValue : pausedHosts
+  });
+  // A storage event can beat the initial read. Reconcile untouched settings
+  // without letting an older read turn protection back on.
+  chrome.storage.sync.get({ enabled: true, scope: 'all', pausedHosts: [] })
+    .then(settings => { if (revision === settingsRevision) applySettings(settings); })
+    .catch(() => {});
 });
 chrome.storage.sync.get(moderationSettings).then(applyModerationSettings).catch(() => {});
 
@@ -141,10 +147,6 @@ async function overrideGuard() {
   if (pin === null) return false;
   return (await sha256hex(pin)) === childMode.pinHash;
 }
-
-// ----------------------------------------------------------- "model loading" UI
-showLoadingBanner();
-waitForModels({ onReady: hideLoadingBanner, timeoutMs: 180000 });
 
 // ------------------------------------------------------------------- shields
 // ---------------------------------------------------------------- stale-node gate
@@ -237,6 +239,7 @@ function resolveLive(key, el) {
  * fine post does not hide the photo, and vice versa.
  */
 function paintShields(key, el, verdict) {
+  if (!isActive()) return false;
   const node = resolveLive(key, el);
   if (!node) {
     domLog(`skip:${key}`, 'node became stale; skipping update');
@@ -261,20 +264,26 @@ function paintShields(key, el, verdict) {
   const unit = unitMemo.get(node) || { el: node, parts: [], text: '', images: [] };
   const wanted = new Set();
   if (textAction !== 'clean') {
-    const target = adapter.textEl?.(unit);
-    if (shields.text?.safescrollTarget !== target) {
-      shields.text?.destroy?.();
-      delete shields.text;
-    }
-    const ts = shields.text ?? createBlurShield(target, { key, siteId, overrideGuard, target: 'text' });
-    if (ts) {
-      ts.safescrollTarget = target;
-      ts.update({ ...verdict, action: textAction });
-      shields.text = ts;
-      wanted.add('text');
+    const targets = adapter.textTargets?.(unit) ?? [adapter.textEl?.(unit)];
+    for (const [index, target] of targets.entries()) {
+      const name = index ? `text:${index}` : 'text';
+      const textAllowed = shields[name]?.dataset.userOverrode === '1';
+      if (shields[name] && (!shields[name].isConnected || shields[name].safescrollTarget !== target)) {
+        shields[name]?.destroy?.();
+        delete shields[name];
+      }
+      const ts = shields[name] ?? createBlurShield(target, { key, siteId, overrideGuard, target: 'text' });
+      if (ts) {
+        ts.safescrollTarget = target;
+        ts.update({ ...verdict, action: textAction });
+        if (textAllowed) ts.hide(true);
+        shields[name] = ts;
+        wanted.add(name);
+      }
     }
   }
   const mediaByUrl = new Map();
+  let staleMediaReason = false;
   for (const reason of mediaReasons) {
     if (reason.action !== 'block' && reason.action !== 'flag') continue;
     // OCR currently runs on the first image; image-model reasons carry the URL
@@ -283,7 +292,10 @@ function paintShields(key, el, verdict) {
     const url = reason.detail?.imageUrl ?? (reason.source !== 'image' ? unit.images?.[0]?.url : null);
     // A virtualized post can replace its images without changing its text key.
     // Never paint an old photo's finding onto the new first photo.
-    if (url && !unit.images?.some(image => image.url === url)) continue;
+    if (url && !unit.images?.some(image => image.url === url)) {
+      staleMediaReason = true;
+      continue;
+    }
     if (!url && reason.source === 'image') continue;
     const id = url || 'default';
     const previous = mediaByUrl.get(id);
@@ -295,8 +307,9 @@ function paintShields(key, el, verdict) {
   for (const [id, item] of mediaByUrl) {
     const name = `media:${id}`;
     const image = unit.images?.find(i => i.url === item.url);
-    const target = image?.el?.parentElement ?? mediaElementFor(adapter, unit);
-    if (shields[name]?.safescrollTarget !== target) {
+    const target = adapter.mediaTarget?.(image, unit) ?? image?.el?.parentElement ?? mediaElementFor(adapter, unit);
+    const mediaAllowed = shields[name]?.dataset.userOverrode === '1';
+    if (shields[name] && (!shields[name].isConnected || shields[name].safescrollTarget !== target)) {
       shields[name]?.destroy?.();
       delete shields[name];
     }
@@ -304,11 +317,19 @@ function paintShields(key, el, verdict) {
     if (ms) {
       ms.safescrollTarget = target;
       ms.update({ ...verdict, action: item.action });
+      if (mediaAllowed) ms.hide(true);
       shields[name] = ms;
       wanted.add(name);
     }
   }
-  if (!wanted.size && !(mediaReasons.length && !textReasons.length)) {
+  // An OCR-only verdict still needs a visible shield when YouTube replaces a
+  // thumbnail node before we can resolve its exact target. Do not paint an old
+  // image finding onto a different image after virtualization, though.
+  if (!wanted.size && (textAction !== 'clean' || !staleMediaReason)) {
+    if (shields.post && !shields.post.isConnected) {
+      shields.post.destroy?.();
+      delete shields.post;
+    }
     const ps = shields.post ?? createShield(node, { key, siteId, overrideGuard });
     if (ps) { ps.update(verdict); shields.post = ps; wanted.add('post'); }
   }
@@ -328,7 +349,7 @@ function paintShields(key, el, verdict) {
 // so entries vanish with the node — no leak when X discards hundreds of posts,
 // and a REPLACED node is a different object, which is exactly what we want
 // (the new node must be observed again rather than inherited from the old one).
-const observedNodes = new WeakSet();
+let observedNodes = new WeakSet();
 function observeUnit(el) {
   if (observedNodes.has(el)) return;
   observedNodes.add(el);
@@ -359,7 +380,7 @@ function registerUnit(unit) {
     if (boundKey && boundKey !== 'skip') removeEntry(boundKey);
     delete el.dataset.safescrollKey;
   }
-  if (existingKey === key) {
+  if (existingKey === key && get(existingKey)) {
     // Already known. A returning element is re-bound and re-shielded from the
     // verdict cache immediately — no clean flash, no re-inference.
     const cached = cachedVerdict(existingKey);
@@ -429,7 +450,7 @@ function registerUnit(unit) {
 /** Split a too-large element into smaller units (latency + blur granularity). */
 function buildUnits(el) {
   const unit = materialise(el, adapter);
-  if (unit.text.length > SPLIT_AT) {
+  if (!unit.noSplit && unit.text.length > SPLIT_AT) {
     const split = splitUnit(el);
     if (split && split.length >= 2) {
       return split.filter(s => s.el?.isConnected);
@@ -452,6 +473,7 @@ function buildUnits(el) {
 // the element, so scan() skipped it forever and a blocked post scrolled out and
 // back in was left completely unmoderated.
 const io = new IntersectionObserver(entries => {
+  if (!isActive()) return;
   for (const e of entries) {
     const el = e.target;
     if (!el.isConnected) {
@@ -471,7 +493,7 @@ const io = new IntersectionObserver(entries => {
 
 /** Materialise and queue one element that is visible or about to be visible. */
 function activateElement(el) {
-  if (!el?.isConnected) return;
+  if (!isActive() || !el?.isConnected) return;
   // Always rebuild the lightweight unit here. Besides first entry, this detects
   // virtualized nodes whose text/media changed without the outer element being
   // removed from the document.
@@ -519,6 +541,7 @@ function isShieldNode(node) {
 // because X often mutates a span inside an existing article instead of adding
 // a brand-new article node.
 const mo = new MutationObserver(mutations => {
+  if (!isActive()) return;
   for (const m of mutations) {
     if (isShieldNode(m.target)) continue;
     let meaningful = m.type !== 'childList';
@@ -549,6 +572,7 @@ const mo = new MutationObserver(mutations => {
 });
 
 function scheduleScan(delay) {
+  if (!isActive()) return;
   clearTimeout(debounceTimer);
   debounceTimer = setTimeout(scanPending, delay);
 }
@@ -589,6 +613,7 @@ function scheduleIdleRescan() {
 }
 
 function processRoot(root, { activateVisible = true } = {}) {
+  if (!isActive()) return;
   animatedScanner.observeRoot(root);
   let els;
   try {
@@ -686,6 +711,7 @@ function drain() {
 }
 
 async function classifyUnit(key, el) {
+  if (!isActive()) return;
   const generation = moderationGeneration;
   try {
     const unit = unitMemo.get(el) || { el, text: el.textContent || '', images: [] };
@@ -726,7 +752,7 @@ async function classifyUnit(key, el) {
     if (verdict.action !== 'clean' && verdict.action !== 'loading') {
       const painted = paintShields(key, el, verdict);
       if (painted && verdict.action === 'block' && !document.getElementById('safescroll-lock')) {
-        lockIfConfigured('Blocked content detected on this feed').catch(e =>
+        lockIfConfigured('Blocked content detected on this feed', isActive).catch(e =>
           console.error('[SafeScroll] scroll lock failed:', e));
       }
     } else if (verdict.action === 'clean' && images.length) {
@@ -791,6 +817,7 @@ function mediaPayload(images = []) {
 }
 
 function refreshExistingMedia(key, el, unit) {
+  if (!isActive()) return;
   const entry = get(key);
   // If text is still queued/in flight, classifyUnit will read the latest unit
   // after its await and send this media itself. Starting a competing pass here
@@ -830,6 +857,7 @@ function refreshExistingMedia(key, el, unit) {
 }
 
 async function classifyMedia(key, images) {
+  if (!isActive()) return { skipped: 'disabled' };
   const fingerprint = mediaFingerprint(images);
   if (mediaRequested.get(key) === fingerprint) {
     domLog(`dedup:${key}`, 'skipping already-requested media pass');
@@ -861,20 +889,14 @@ async function classifyMedia(key, images) {
 }
 
 // Safety valve: bound registry growth on high-churn feeds.
-const pruneTimer = setInterval(() => { if (!destroyed) prune(); }, 10000);
+const pruneTimer = setInterval(() => { if (isActive()) prune(); }, 10000);
 
 function stopContentScript({ invalidated = false } = {}) {
   if (destroyed) return;
   destroyed = true;
+  suspendScanning();
   animatedScanner.stop();
-  mo.disconnect();
-  io.disconnect();
-  clearTimeout(debounceTimer);
-  clearTimeout(idleTimer);
   clearInterval(pruneTimer);
-  pendingRoots.clear();
-  queue.length = 0;
-  hideLoadingBanner();
   if (invalidated) {
     // The new extension context is injected by Chrome on navigation/refresh.
     // Release any stale loading overlays and emit one actionable message rather
@@ -896,6 +918,32 @@ if (document.readyState === 'loading') {
 
 function start() {
   if (destroyed) return;
+  domReady = true;
+  resumeScanning();
+}
+
+function suspendScanning() {
+  if (scanning) {
+    mo.disconnect();
+    io.disconnect();
+    observedNodes = new WeakSet();
+    scanning = false;
+  }
+  moderationGeneration++;
+  clearTimeout(debounceTimer);
+  clearTimeout(idleTimer);
+  pendingRoots.clear();
+  queue.length = 0;
+  mediaRequested.clear();
+  animatedScanner.reset();
+  clearAll();
+  hideAllShields();
+  hideLoadingBanner();
+  if (isScrollLocked()) unlock();
+}
+
+function resumeScanning() {
+  if (!domReady || !isActive() || scanning) return;
   const target = document.body || document.documentElement;
   try {
     mo.observe(target, {
@@ -909,6 +957,9 @@ function start() {
     console.error('[SafeScroll] observer failed:', e);
     return;
   }
+  scanning = true;
+  showLoadingBanner();
+  waitForModels({ timeoutMs: 180000 }).then(hideLoadingBanner);
   processRoot(target);
   prune();
   scheduleIdleRescan();
@@ -956,6 +1007,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return;
   }
   if (msg?.type === MSG.VERDICT_REFINED) {
+    if (!isActive()) return;
     const { key, verdict } = msg;
     if (msg.retryDropped && key && msg.mediaFingerprint === mediaRequested.get(key)) {
       mediaRequested.delete(key);
@@ -981,9 +1033,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     try {
       const toggled = msg.toggle ? await toggleHostPause(location.hostname) : null;
       if (toggled) {
-        paused = toggled.paused;
-        if (paused) hideAllShields();
-        else { prune(); scheduleScan(0); }
+        applySettings({ enabled, scope, pausedHosts: toggled.hosts });
       }
       sendResponse({
         state: {

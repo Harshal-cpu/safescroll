@@ -99,9 +99,9 @@ function unfreezeScroll() {
   document.body.style.overflow = '';
 }
 
-export async function lockIfConfigured(reason = 'Blocked content detected') {
+export async function lockIfConfigured(reason = 'Blocked content detected', isActive = () => true) {
   const { scrollLock, childMode } = await getSettings();
-  if (!scrollLock || !childMode?.enabled || !childMode?.pinHash) return false;
+  if (!isActive() || !scrollLock || !childMode?.enabled || !childMode?.pinHash) return false;
   if (lockOverlay) return true; // already locked
 
   lockOverlay = document.createElement('div');

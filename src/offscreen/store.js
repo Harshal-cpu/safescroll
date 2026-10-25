@@ -137,11 +137,16 @@ export async function putImageVerdict(url, verdict) {
 
 /** Drop every cached verdict (dashboard "clear cache" affordance). */
 export async function clearVerdicts() {
+  writeBuffer.clear();
+  if (flushTimer) clearTimeout(flushTimer);
+  flushTimer = null;
   const db = await openDb();
-  const tx = db.transaction([STORE_VERDICTS, STORE_IMAGES], 'readwrite');
+  const tx = db.transaction([STORE_VERDICTS, STORE_IMAGES, STORE_PENDING], 'readwrite');
   tx.objectStore(STORE_VERDICTS).clear();
   tx.objectStore(STORE_IMAGES).clear();
+  tx.objectStore(STORE_PENDING).clear();
   await txDone(tx);
+  chrome.runtime.sendMessage({ type: MSG.VERDICTS_UPDATED }).catch(() => {});
   return true;
 }
 
@@ -175,6 +180,7 @@ export async function flushWriteBuffer() {
       key, verdict, policyVersion: VERDICT_POLICY_VERSION, ts: verdict?.ts ?? Date.now()
     });
     await txDone(tx);
+    chrome.runtime.sendMessage({ type: MSG.VERDICTS_UPDATED }).catch(() => {});
   } catch (e) {
     // Put them back so the next flush retries; nothing is lost.
     for (const [k, v] of batch) writeBuffer.set(k, v);
@@ -268,11 +274,12 @@ export async function exportFeedback(format = 'json') {
 }
 
 export async function getRecentVerdicts(limit = 20) {
+  await flushWriteBuffer();
   const db = await openDb();
   const rows = await new Promise((resolve, reject) => {
     const out = [];
     const tx = db.transaction(STORE_VERDICTS, 'readonly');
-    const req = tx.objectStore(STORE_VERDICTS).openCursor(null, 'prev'); // newest last; keyPath 'key' is a string — use openCursor reversed
+    const req = tx.objectStore(STORE_VERDICTS).openCursor();
     req.onsuccess = () => {
       const c = req.result;
       if (!c) return resolve(out);
@@ -281,7 +288,7 @@ export async function getRecentVerdicts(limit = 20) {
     };
     req.onerror = () => reject(req.error);
   });
-  return rows.slice(-limit).reverse();
+  return rows.sort((a, b) => (b.ts ?? 0) - (a.ts ?? 0)).slice(0, limit);
 }
 
 export async function getSessionStats() {
@@ -300,6 +307,7 @@ export async function getSessionStats() {
   });
   const blocked = rows.filter(r => r.verdict?.action === 'block').length;
   const flagged = rows.filter(r => r.verdict?.action === 'flag').length;
+  const clean = rows.filter(r => r.verdict?.action === 'clean').length;
   // per-source breakdown (which tier caused the verdict)
   const bySource = {};
   for (const r of rows) {
@@ -308,7 +316,7 @@ export async function getSessionStats() {
       bySource[k] = (bySource[k] ?? 0) + 1;
     }
   }
-  return { ok: true, blocked, flagged, total: rows.length, bySource };
+  return { ok: true, blocked, flagged, clean, total: rows.length, bySource };
 }
 
 // ------------------------------------------------- ImageBitmap transport probe

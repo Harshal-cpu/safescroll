@@ -328,10 +328,24 @@ const INSTAGRAM_COMMENT_SELECTOR = [
 ].join(',');
 
 const INSTAGRAM_TEXT_SELECTOR = 'h1, [data-testid="post-caption"], p, [dir="auto"], span';
+const INSTAGRAM_TILE_SELECTOR = 'a[href*="/p/"], a[href*="/reel/"]';
 const INSTAGRAM_UI_TEXT = /^(?:like|likes|reply|replies|follow|following|more|see translation|edited|view(?: all)?(?: \d+)? comments?|\d+[smhdwy])$/i;
 
 function normalizedText(el) {
-  return (el?.innerText || el?.textContent || '').replace(/\s+/g, ' ').trim();
+  if (!el) return '';
+  // A block-level caption can contain our own shield after its first verdict.
+  // Do not feed the shield label back into the next Instagram classification.
+  if (!el.querySelector?.('[data-safescroll]')) {
+    return (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim();
+  }
+  const pieces = [];
+  const visit = node => {
+    if (node.nodeType === Node.TEXT_NODE) { pieces.push(node.nodeValue); return; }
+    if (node.nodeType !== Node.ELEMENT_NODE || node.hasAttribute('data-safescroll')) return;
+    for (const child of node.childNodes) visit(child);
+  };
+  visit(el);
+  return pieces.join(' ').replace(/\s+/g, ' ').trim();
 }
 
 function instagramCommentElements(root) {
@@ -342,8 +356,9 @@ function instagramCommentElements(root) {
   const seen = new Set();
   for (const el of candidates) {
     if (!el?.isConnected || seen.has(el) || el.closest('[data-safescroll="shield"]')) continue;
-    const text = normalizedText(el);
-    if (text.length < 4) continue;
+    // Detection runs over many off-screen rows. textContent avoids the layout
+    // read incurred by innerText; precise extraction happens on viewport entry.
+    if ((el.textContent || '').trim().length < 4) continue;
     // A real IG comment/caption row has an author/profile link, a heading, or
     // an explicit comment/listitem semantic. This rejects carousel dots and
     // action-menu list items that happen to sit under the article/dialog.
@@ -414,6 +429,49 @@ function instagramCommentText(el) {
   return instagramTextParts(el, { single: true });
 }
 
+function instagramImages(el) {
+  const excluded = new Set();
+  for (const image of el.querySelectorAll('img')) {
+    // Instagram avatars are often served from large source files. The natural
+    // dimensions alone would admit them ahead of the visible photo or tile.
+    if (image.closest('header, footer') || image.closest(INSTAGRAM_COMMENT_SELECTOR) ||
+        /profile picture|avatar/i.test(image.alt || '')) {
+      excluded.add(image);
+      continue;
+    }
+    const rect = image.getBoundingClientRect();
+    if (rect.width < 80 || rect.height < 80) excluded.add(image);
+  }
+  const images = extractImages(el, { exclude: excluded });
+  if (images.length) return images;
+  // Reels can expose their paused cover only as <video poster>. Classify that
+  // still URL once; decoded playback frames remain with the video scanner.
+  const video = el.querySelector('video[poster]');
+  const poster = video?.poster;
+  if (video?.isConnected && /^https?:/i.test(poster || '')) {
+    const rect = video.getBoundingClientRect();
+    if (rect.width >= 80 && rect.height >= 80) return [{ url: poster, el: video, dataUrl: null }];
+  }
+  return images;
+}
+
+function instagramTextTargets(post) {
+  const parts = post.parts ?? [];
+  if (post.el.matches?.(INSTAGRAM_COMMENT_SELECTOR)) return parts[0]?.el ? [parts[0].el] : [];
+  const out = [];
+  for (const part of parts) {
+    const carrier = part.el.closest?.('[data-testid="post-caption"], h1, [role="button"]');
+    const target = carrier && carrier !== post.el && post.el.contains(carrier) &&
+      !carrier.closest(INSTAGRAM_COMMENT_SELECTOR) &&
+      !carrier.querySelector('img, video, ' + INSTAGRAM_COMMENT_SELECTOR)
+      ? carrier : part.el;
+    if (out.some(existing => existing === target || existing.contains(target))) continue;
+    for (let i = out.length - 1; i >= 0; i--) if (target.contains(out[i])) out.splice(i, 1);
+    out.push(target);
+  }
+  return out;
+}
+
 export const instagramAdapter = {
   siteId: 'instagram',
   units(root = document) {
@@ -427,19 +485,28 @@ export const instagramAdapter = {
     if (root.matches?.('article')) add(root);
     root.querySelectorAll?.('article').forEach(add);
     instagramCommentElements(root).forEach(add);
+    const tiles = root.matches?.(INSTAGRAM_TILE_SELECTOR) ? [root] : [];
+    tiles.push(...(root.querySelectorAll?.(INSTAGRAM_TILE_SELECTOR) ?? []));
+    for (const tile of tiles) {
+      if (!tile.closest('article') && tile.querySelector('img')) add(tile);
+    }
     return out;
   },
   containingUnit(node) {
     const el = node?.nodeType === 1 ? node : node?.parentElement;
-    return el?.closest?.(INSTAGRAM_COMMENT_SELECTOR) ?? el?.closest?.('article') ?? null;
+    return el?.closest?.(INSTAGRAM_COMMENT_SELECTOR) ?? el?.closest?.('article') ??
+      el?.closest?.(INSTAGRAM_TILE_SELECTOR) ?? null;
   },
   extract(el) {
     const comment = el.matches?.(INSTAGRAM_COMMENT_SELECTOR);
-    const parts = comment ? instagramCommentText(el) : instagramPostTexts(el);
+    const tile = el.matches?.(INSTAGRAM_TILE_SELECTOR);
+    const parts = comment ? instagramCommentText(el) : tile ? [] : instagramPostTexts(el);
     const text = parts.map(p => p.text).join('\n');
-    const images = comment ? [] : rasteriseAll(extractImages(el));
+    // extractImages already captures readable pixels once. A second canvas
+    // attempt on Instagram CDN images is usually tainted and delays OCR.
+    const images = comment ? [] : instagramImages(el);
     if (!text && !images.length) return null;
-    return { el, parts, text, images, minChars: 4 };
+    return { el, parts, text, images, minChars: 4, noSplit: true };
   },
   key(post) {
     const el = post.el;
@@ -448,7 +515,7 @@ export const instagramAdapter = {
         el.querySelector('a[href*="comment_id="], a[href*="/c/"]')?.getAttribute('href') || '';
       return hash(`ig-comment:${commentId}:${post.text}:${domPath(el)}`);
     }
-    const link = el.querySelector('a[href*="/p/"], a[href*="/reel/"]');
+    const link = el.matches?.(INSTAGRAM_TILE_SELECTOR) ? el : el.querySelector(INSTAGRAM_TILE_SELECTOR);
     const slug = link?.href.match(/\/(p|reel)\/([^/]+)/)?.[0];
     const text = post.text;
     if (slug) return hash(`ig:${slug}:${text}`);
@@ -463,8 +530,16 @@ export const instagramAdapter = {
     }
     return post.el;
   },
+  textTargets(post) {
+    return instagramTextTargets(post);
+  },
   mediaEl(post) {
-    return post.el.querySelector('img[srcset], img[src*="cdninstagram"], img[src*="fbcdn"], video')?.parentElement;
+    const media = post.images?.[0]?.el;
+    return media?.tagName === 'VIDEO' ? media : media?.parentElement ?? null;
+  },
+  mediaTarget(image, post) {
+    if (image?.el?.tagName === 'VIDEO') return image.el;
+    return image?.el?.closest?.('picture') ?? image?.el?.parentElement ?? this.mediaEl(post);
   }
 };
 
@@ -695,38 +770,152 @@ export const redditAdapter = {
 };
 
 // ---------------------------------------------------------------------- YouTube
+const YT_VIDEO_UNITS = [
+  'ytd-rich-item-renderer', 'ytd-video-renderer', 'ytd-compact-video-renderer',
+  'yt-lockup-view-model', 'ytd-reel-item-renderer',
+  'ytm-rich-item-renderer', 'ytm-video-with-context-renderer',
+  'ytm-video-renderer', 'ytm-compact-video-renderer', 'ytm-video-card-renderer',
+  'ytm-shorts-lockup-view-model'
+].join(',');
+const YT_COMMENT_UNITS = [
+  'ytd-comment-thread-renderer', 'ytd-comment-view-model', 'ytd-comment-renderer',
+  'ytm-comment-thread-renderer', 'ytm-comment-view-model', 'ytm-comment-renderer'
+].join(',');
+const YT_POST_UNITS = 'ytd-post-renderer, ytd-backstage-post-renderer, ytm-post-renderer';
+const YT_WATCH = 'ytd-watch-metadata, ytm-watch-metadata';
+const YT_THUMBNAIL = 'ytd-thumbnail, ytm-thumbnail, yt-thumbnail-view-model';
+const YT_THUMBNAIL_IMAGE = 'img[src*="ytimg.com/vi/"], img[src*="ytimg.com/vi_webp/"], img[srcset*="ytimg.com/vi/"]';
+const YT_UNITS = [YT_VIDEO_UNITS, YT_COMMENT_UNITS, YT_POST_UNITS].join(',');
+
+function youtubeText(el) {
+  if (!el) return '';
+  const pieces = [];
+  const visit = node => {
+    if (node.nodeType === Node.TEXT_NODE) { pieces.push(node.nodeValue); return; }
+    if (node.nodeType !== Node.ELEMENT_NODE || node.hasAttribute('data-safescroll')) return;
+    for (const child of node.childNodes) visit(child);
+  };
+  visit(el);
+  return pieces.join(' ').replace(/\s+/g, ' ').trim();
+}
+
+function firstYouTubeText(root, selectors) {
+  for (const selector of selectors) {
+    const candidate = root.matches?.(selector) ? root : root.querySelector?.(selector);
+    if (candidate && (candidate.textContent || '').trim().length >= 4) return candidate;
+  }
+  return null;
+}
+
+function youtubeTextTarget(el) {
+  if (el.matches?.(YT_COMMENT_UNITS)) {
+    return firstYouTubeText(el, [
+      '#content-text', 'ytm-comment-text-renderer', '.comment-text', '#text'
+    ]);
+  }
+  if (el.matches?.(YT_POST_UNITS)) {
+    return firstYouTubeText(el, [
+      '#content-text', '#post-content', 'yt-formatted-string#content',
+      'yt-attributed-string#content'
+    ]);
+  }
+  if (el.matches?.(YT_VIDEO_UNITS)) {
+    return firstYouTubeText(el, [
+      '#video-title', 'a#video-title-link', '.media-item-headline',
+      '.yt-lockup-metadata-view-model__title', 'h3', 'h2'
+    ]);
+  }
+  return el;
+}
+
+function youtubeThumbnail(el) {
+  if (el.matches?.(YT_THUMBNAIL)) return el;
+  const thumbnail = el.querySelector?.(YT_THUMBNAIL);
+  if (thumbnail) return thumbnail;
+  // Some newer cards render a plain image instead of a ytd/ytm thumbnail host.
+  return el.querySelector?.(YT_THUMBNAIL_IMAGE)?.parentElement ??
+    el.querySelector?.('a[href*="/watch"] > img')?.parentElement ?? null;
+}
+
+function youtubeWatchParts(watch) {
+  const title = firstYouTubeText(watch, [
+    'h1 yt-formatted-string', 'h1 yt-attributed-string', 'h1',
+    'ytm-watch-metadata .slim-video-information-title'
+  ]);
+  const description = firstYouTubeText(watch, [
+    '#description-inner yt-attributed-string',
+    '#description-inline-expander #attributed-snippet-text',
+    '#description-inner yt-formatted-string',
+    '#description-inline-expander', '#description-inner', '#description'
+  ]);
+  return [title, description].filter((part, index, parts) =>
+    part && !parts.some((other, otherIndex) => otherIndex < index && (other === part || other.contains(part)))
+  );
+}
+
 export const youtubeAdapter = {
   siteId: 'youtube',
   units(root = document) {
-    const selector = 'ytd-rich-item-renderer, ytd-video-renderer, ytd-compact-video-renderer, ytd-comment-thread-renderer, ytd-watch-metadata';
-    const out = root.matches?.(selector) ? [root] : [];
-    out.push(...root.querySelectorAll(selector));
+    const out = [];
+    const seen = new Set();
+    const add = el => { if (el?.isConnected && !seen.has(el)) { seen.add(el); out.push(el); } };
+    const candidates = root.matches?.(YT_UNITS) ? [root] : [];
+    candidates.push(...(root.querySelectorAll?.(YT_UNITS) ?? []));
+    for (const el of candidates) {
+      // Current YouTube nests a comment view-model in a thread and a mobile
+      // video renderer in a rich item. Scan the innermost authored unit once.
+      if (el.matches(YT_COMMENT_UNITS) && el.querySelector(YT_COMMENT_UNITS)) continue;
+      if (el.matches(YT_VIDEO_UNITS) && el.querySelector(YT_VIDEO_UNITS)) continue;
+      add(el);
+    }
+    const watches = root.matches?.(YT_WATCH) ? [root] : [];
+    watches.push(...(root.querySelectorAll?.(YT_WATCH) ?? []));
+    const ancestorWatch = root.closest?.(YT_WATCH);
+    if (ancestorWatch) watches.push(ancestorWatch);
+    for (const watch of watches) youtubeWatchParts(watch).forEach(add);
     return out;
   },
   containingUnit(node) {
     const el = node?.nodeType === 1 ? node : node?.parentElement;
-    return el?.closest?.('ytd-rich-item-renderer, ytd-video-renderer, ytd-compact-video-renderer, ytd-comment-thread-renderer, ytd-watch-metadata') ?? null;
+    if (!el?.closest) return null;
+    const watch = el.closest(YT_WATCH);
+    if (watch) return youtubeWatchParts(watch).find(part => part === el || part.contains(el)) ?? watch;
+    return el.closest(YT_UNITS);
+  },
+  extract(el) {
+    const target = youtubeTextTarget(el);
+    const text = youtubeText(target);
+    const thumbnail = youtubeThumbnail(el);
+    // Video playback is not a still image. Only classify the visible thumbnail
+    // or images attached to a community post, never the player or controls.
+    const images = thumbnail ? extractImages(thumbnail, {
+      limit: 1, rasterize: false, minWidth: 120, minHeight: 70
+    })
+      : el.matches?.(YT_POST_UNITS) ? extractImages(el) : [];
+    return {
+      el, parts: text ? [{ el: target, text }] : [], text,
+      images, minChars: 4, noSplit: true
+    };
   },
   key(post) {
     const el = post.el;
-    const link = el.querySelector('a#video-title-link, a#thumbnail, a[href*="watch"]');
-    const id = link?.href?.match(/[?&]v=([\w-]+)/)?.[1] ?? link?.href;
-    const text = post.text;
-    // comment threads: author channel id = stable per commenter
-    const cid = el.querySelector('#author-comment-id, ytd-comment-view-model')?.getAttribute('data-id') ?? '';
-    return hash(`yt:${id ?? 'none'}:${cid}:${text}:${domPath(el)}`);
+    const link = el.querySelector?.('a#video-title-link, a#thumbnail, a[href*="watch?v="]');
+    const videoId = el.getAttribute?.('video-id') || link?.href?.match(/[?&]v=([\w-]+)/)?.[1];
+    const commentId = el.getAttribute?.('comment-id') || el.getAttribute?.('data-id') ||
+      el.querySelector?.('[comment-id], [data-id]')?.getAttribute('comment-id') ||
+      el.querySelector?.('[comment-id], [data-id]')?.getAttribute('data-id');
+    const identity = videoId || commentId || domPath(el);
+    return hash(`yt:v2:${el.localName}:${identity}:${post.text}`);
   },
   textEl(post) {
-    const el = post.el;
-    if (el.tagName === 'YTD-COMMENT-THREAD-RENDERER' || el.tagName === 'YTD-COMMENT-VIEW-MODEL') {
-      return el.querySelector('#content-text, #text')?.parentElement;
-    }
-    return el.querySelector('#video-title, h1.title, h3')?.parentElement;
+    return post.parts?.[0]?.el ?? null;
   },
   mediaEl(post) {
-    const el = post.el;
-    if (el.tagName === 'YTD-COMMENT-THREAD-RENDERER' || el.tagName === 'YTD-COMMENT-VIEW-MODEL') return null; // text-only
-    return el.querySelector('#player, ytd-player, img.ytCinematicContainerViewModelBackgroundImage, img[src*="ytimg.com/vi/"], video, ytd-thumbnail')?.parentElement;
+    return youtubeThumbnail(post.el) ??
+      (post.el.matches?.(YT_POST_UNITS) ? post.images?.[0]?.el?.parentElement ?? null : null);
+  },
+  mediaTarget(image, unit) {
+    return image?.el?.closest?.(YT_THUMBNAIL) ?? this.mediaEl(unit);
   }
 };
 

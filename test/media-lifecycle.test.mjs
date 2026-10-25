@@ -21,6 +21,7 @@ function harness(runMediaTiers) {
   const effects = [];
   let stored = { action: 'clean', settingsPolicy: policy, reasons: [] };
   const context = {
+    protectionEnabled: true, protectionGeneration: 0,
     runtime: { imageEnabled: true, ocrEnabled: true, lexiconEnabled: true },
     settingsPolicy: () => policy, MSG, mediaFingerprint, refineVerdict, reconcileMediaVerdict,
     runtimeSettingsReady: Promise.resolve(),

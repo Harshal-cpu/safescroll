@@ -14,6 +14,7 @@ test('GIF frames use the existing image/OCR tiers and stop after a confirmed blo
   const examined = [];
   const context = {
     runtimeSettingsReady: Promise.resolve(), runtime: { imageEnabled: true, ocrEnabled: true },
+    protectionEnabled: true, protectionGeneration: 0,
     settingsPolicy: () => '1:1:1', MSG: { ANIMATED_VERDICT: 'animated-verdict' },
     chrome: { runtime: { sendMessage: message => { broadcasts.push(message); return Promise.resolve(); } } },
     decodeGifFrames: async function* () {
@@ -38,6 +39,7 @@ test('video frame OCR finding sends a verdict without classifying the poster', a
   const broadcasts = [];
   const context = {
     runtimeSettingsReady: Promise.resolve(), runtime: { imageEnabled: false, ocrEnabled: true },
+    protectionEnabled: true, protectionGeneration: 0,
     settingsPolicy: () => '0:1:1', MSG: { ANIMATED_VERDICT: 'animated-verdict' },
     chrome: { runtime: { sendMessage: message => { broadcasts.push(message); return Promise.resolve(); } } },
     runMediaTiers: async images => {

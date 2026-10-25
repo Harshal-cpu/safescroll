@@ -61,8 +61,8 @@ let offscreenVerified = false;
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg?.type === MSG.GET_RUNTIME_SETTINGS) {
-    chrome.storage.sync.get(MODERATION_DEFAULTS)
-      .then(values => sendResponse({ settings: normalizeModerationSettings(values) }))
+    chrome.storage.sync.get({ ...MODERATION_DEFAULTS, enabled: true })
+      .then(values => sendResponse({ settings: normalizeModerationSettings(values), enabled: values.enabled !== false }))
       .catch(error => sendResponse({ error: String(error) }));
     return true;
   }
@@ -99,7 +99,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
   if (OFFSCREEN_ROUTED.has(msg?.type)) {
     // Relay to offscreen; keep the port open for the async response.
-    relayToOffscreen(msg).then(sendResponse);
+    const scanRequest = [MSG.CLASSIFY, MSG.CLASSIFY_MEDIA, MSG.CLASSIFY_ANIMATED].includes(msg.type);
+    const response = scanRequest
+      ? chrome.storage.sync.get({ enabled: true }).then(({ enabled }) =>
+        enabled === false ? { ok: false, error: 'protection-disabled' } : relayToOffscreen(msg))
+      : relayToOffscreen(msg);
+    response.then(sendResponse).catch(error => sendResponse({ ok: false, error: String(error) }));
     return true;
   }
 });
@@ -107,7 +112,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 // Offscreen documents have runtime messaging but no chrome.storage API.
 let settingsRevision = 0;
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area !== 'sync' || !Object.keys(MODERATION_DEFAULTS).some(key => key in changes)) return;
+  if (area !== 'sync') return;
+  if (changes.enabled) {
+    chrome.runtime.sendMessage({ type: MSG.PROTECTION_CHANGED,
+      enabled: changes.enabled.newValue !== false, [RELAY_MARK]: 1 }).catch(() => {});
+  }
+  if (!Object.keys(MODERATION_DEFAULTS).some(key => key in changes)) return;
   const revision = ++settingsRevision;
   chrome.storage.sync.get(MODERATION_DEFAULTS).then(values => {
     if (revision !== settingsRevision) return;

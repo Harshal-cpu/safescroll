@@ -44,6 +44,23 @@ const OCR_WAIT_MS = 6000;
 const runtime = { ...MODERATION_DEFAULTS };
 let runtimeSettingsReady = Promise.resolve();
 let settingsChangeVersion = 0;
+let protectionChangeVersion = 0;
+let protectionEnabled = false;
+let protectionGeneration = 0;
+
+function applyProtectionEnabled(value) {
+  const next = value !== false;
+  if (next === protectionEnabled) return;
+  protectionEnabled = next;
+  protectionGeneration++;
+  if (next) { startLoading(); return; }
+  cancelQueuedOcr();
+  mediaRetryQueue.clear();
+  mediaRetryKeys.clear();
+  clearTimeout(mediaRetryTimer);
+  mediaRetryTimer = null;
+  for (const entry of animatedQueue.splice(0)) entry.resolve({ ok: false, skipped: 'protection-disabled' });
+}
 
 function applyRuntimeSettings(v = {}) {
   const wasOcrEnabled = runtime.ocrEnabled;
@@ -58,9 +75,11 @@ function settingsPolicy() {
 }
 async function syncRuntimeSettings() {
   const version = settingsChangeVersion;
+  const protectionVersion = protectionChangeVersion;
   const response = await chrome.runtime.sendMessage({ type: MSG.GET_RUNTIME_SETTINGS });
   if (!response?.settings) throw new Error(response?.error ?? 'runtime settings unavailable');
   if (version === settingsChangeVersion) applyRuntimeSettings(response.settings);
+  if (protectionVersion === protectionChangeVersion) applyProtectionEnabled(response.enabled);
 }
 
 // ---------------------------------------------------------------- message router
@@ -77,6 +96,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (OFFSCREEN_ROUTED.has(msg?.type) && !msg[RELAY_MARK]) return false;
 
   switch (msg?.type) {
+    case MSG.PROTECTION_CHANGED:
+      if (!msg[RELAY_MARK]) return false;
+      protectionChangeVersion++;
+      applyProtectionEnabled(msg.enabled);
+      sendResponse({ ok: true });
+      return false;
     case MSG.RUNTIME_SETTINGS_CHANGED:
       if (!msg[RELAY_MARK]) return false;
       settingsChangeVersion++;
@@ -286,9 +311,8 @@ function withTimeout(promise, ms, label) {
   ]);
 }
 
-// 4. Warm up models at boot (not only on first classify) so the popup reaches
-// "ready" without needing a feed visit first.
-startLoading();
+// Warm models only while protection is enabled. The initial settings sync and
+// later master-switch changes call startLoading() through applyProtectionEnabled.
 
 function startLoading() {
   if (loadStarted) return;
@@ -342,6 +366,8 @@ function startLoading() {
 //    feed of fifty images cannot stall the pipeline.
 async function handleClassify(msg) {
   await runtimeSettingsReady;
+  if (!protectionEnabled) return { ok: false, error: 'protection-disabled' };
+  const masterGeneration = protectionGeneration;
   const policy = settingsPolicy();
   startLoading();
   const { text = '', images = [], siteId = 'generic', referer = null, host = null } = msg;
@@ -355,6 +381,9 @@ async function handleClassify(msg) {
   const key = msg.key;
   if (key) {
     const cached = await getVerdict(key, policy);
+    if (!protectionEnabled || masterGeneration !== protectionGeneration) {
+      return { ok: false, error: 'protection-disabled' };
+    }
     if (cached && CACHEABLE.has(cached.action)) {
       return { verdict: cached };
     }
@@ -389,7 +418,7 @@ async function handleClassify(msg) {
   const textVerdict = lexVerdict.action === 'block'
     ? { action: 'clean', source: 'text', reason: 'skipped-lexicon-block' }
     : (text ? await classifyText(text, postProgress) : { action: 'clean', reason: 'no-text' });
-  if (settingsPolicy() !== policy) {
+  if (!protectionEnabled || masterGeneration !== protectionGeneration || settingsPolicy() !== policy) {
     return { verdict: { action: 'clean', reason: 'settings-changed', settingsPolicy: policy } };
   }
 
@@ -529,6 +558,8 @@ function drainAnimatedQueue() {
 
 async function handleClassifyAnimated(msg) {
   await runtimeSettingsReady;
+  if (!protectionEnabled) return { ok: false, skipped: 'protection-disabled' };
+  const masterGeneration = protectionGeneration;
   const { scanId, kind, frameIndex = 0, dataUrl, url, referer = null } = msg;
   if (typeof scanId !== 'string' || scanId.length > 120 || !scanId.startsWith('ssanim:') ||
       !['video', 'gif'].includes(kind) || (!runtime.imageEnabled && !runtime.ocrEnabled)) {
@@ -544,7 +575,8 @@ async function handleClassifyAnimated(msg) {
   const policy = settingsPolicy();
   let strongest = 'clean';
   const publish = (verdict, index) => {
-    if (!verdict || !['block', 'flag'].includes(verdict.action) || settingsPolicy() !== policy) return;
+    if (!protectionEnabled || masterGeneration !== protectionGeneration ||
+        !verdict || !['block', 'flag'].includes(verdict.action) || settingsPolicy() !== policy) return;
     if (strongest === 'block' || (strongest === 'flag' && verdict.action === 'flag')) return;
     strongest = verdict.action;
     chrome.runtime.sendMessage({
@@ -558,7 +590,8 @@ async function handleClassifyAnimated(msg) {
     : decodeGifFrames(url, referer);
   let checked = 0;
   for await (const frame of frames) {
-    if (settingsPolicy() !== policy || strongest === 'block') break;
+    if (!protectionEnabled || masterGeneration !== protectionGeneration ||
+        settingsPolicy() !== policy || strongest === 'block') break;
     checked++;
     const media = await runMediaTiers([{ url: null, dataUrl: frame.dataUrl }], referer,
       { action: 'clean' }, null, verdict => publish(verdict, frame.frameIndex),
@@ -573,6 +606,8 @@ async function handleClassifyAnimated(msg) {
 
 async function handleClassifyMedia(msg, { deferred = false, resumedMedia = null } = {}) {
   await runtimeSettingsReady;
+  if (!protectionEnabled) return { skipped: 'protection-disabled' };
+  const masterGeneration = protectionGeneration;
   const policy = settingsPolicy();
   const { key, images = [], referer = null, siteId = 'generic', host = null } = msg;
   const imageList = (images || []).filter(i => i && (i.url || i.dataUrl));
@@ -597,7 +632,8 @@ async function handleClassifyMedia(msg, { deferred = false, resumedMedia = null 
     mediaLatestFp.set(key, fp);
     if (mediaLatestFp.size > MEDIA_DONE_MAX) mediaLatestFp.delete(mediaLatestFp.keys().next().value);
   } else if (mediaLatestFp.get(key) !== fp) return { skipped: 'stale-media' };
-  const isCurrent = () => settingsPolicy() === policy && mediaLatestFp.get(key) === fp;
+  const isCurrent = () => protectionEnabled && masterGeneration === protectionGeneration &&
+    settingsPolicy() === policy && mediaLatestFp.get(key) === fp;
 
   // ---- duplicate-processing guard (same post, same images) -------------
   if (mediaInFlight.has(key)) {

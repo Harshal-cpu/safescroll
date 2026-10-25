@@ -26,7 +26,7 @@ export function createAnimatedMediaScanner({ send, createShield, overrideGuard, 
       if (!state) continue;
       state.visible = entry.isIntersecting;
       if (state.visible) {
-        if (state.kind === 'video' && state.sampled.size < FRAME_TIMES.length) state.baseTime = state.el.currentTime;
+        if (state.kind === 'video' && !state.el.paused && state.sampled.size < FRAME_TIMES.length) state.baseTime = state.el.currentTime;
         start(state);
       }
       else cancelFrame(state);
@@ -67,7 +67,7 @@ export function createAnimatedMediaScanner({ send, createShield, overrideGuard, 
   }
 
   function capture(state, mediaTime) {
-    if (!current(state) || !state.visible || !isShortVideo(state.el.duration) ||
+    if (!current(state) || !state.visible || state.el.paused || !isShortVideo(state.el.duration) ||
         state.el.readyState < 2 || state.sampled.size >= FRAME_TIMES.length) return;
     const elapsed = Math.max(0, mediaTime - (state.baseTime ?? mediaTime));
     if (elapsed > 2.5) return;
@@ -92,7 +92,7 @@ export function createAnimatedMediaScanner({ send, createShield, overrideGuard, 
   }
 
   function scheduleFrame(state) {
-    if (!current(state) || !state.visible || state.unreadable ||
+    if (!current(state) || !state.visible || state.el.paused || state.unreadable ||
         state.callbackId != null || state.sampled.size >= FRAME_TIMES.length ||
         typeof state.el.requestVideoFrameCallback !== 'function') return;
     state.callbackId = state.el.requestVideoFrameCallback((_now, info) => {
@@ -116,7 +116,8 @@ export function createAnimatedMediaScanner({ send, createShield, overrideGuard, 
         }).catch(() => {});
       return;
     }
-    if (!isShortVideo(state.el.duration)) return;
+    if (state.el.paused || !isShortVideo(state.el.duration)) return;
+    if (state.sampled.size === 0) state.baseTime = state.el.currentTime;
     capture(state, state.el.currentTime);
     scheduleFrame(state);
   }
@@ -153,12 +154,20 @@ export function createAnimatedMediaScanner({ send, createShield, overrideGuard, 
     if (!state || !current(state) || verdict?.settingsPolicy !== policy() ||
         !['block', 'flag'].includes(verdict?.action) ||
         state.shield?.dataset.userOverrode === '1') return;
-    if (state.action === 'block' || (state.action === 'flag' && verdict.action === 'flag')) return;
+    let action = verdict.action;
+    if (state.kind === 'video' && verdict.source === 'image') {
+      if (!Number.isInteger(msg.frameIndex) || msg.frameIndex < 0) return;
+      state.imageFindings ??= new Map();
+      if (state.imageFindings.get(msg.frameIndex) !== 'block') state.imageFindings.set(msg.frameIndex, action);
+      if (state.imageFindings.size < 2) return;
+      action = [...state.imageFindings.values()].includes('block') ? 'block' : 'flag';
+    }
+    if (state.action === 'block' || (state.action === 'flag' && action === 'flag')) return;
     const parent = state.el.parentElement;
     if (!parent || ['BODY', 'HTML', 'MAIN'].includes(parent.tagName)) return;
     if (!state.shield) {
       state.shield = createShield(parent, { target: 'media', key: state.id, siteId,
-        overrideGuard, verdict: { action: verdict.action } });
+        overrideGuard, verdict: { action } });
       if (!state.shield) return;
       const position = () => {
         if (!state.shield?.isConnected || !state.el.isConnected) return;
@@ -175,10 +184,10 @@ export function createAnimatedMediaScanner({ send, createShield, overrideGuard, 
       state.layoutObserver.observe(state.shield.parentElement || parent);
       position();
     }
-    state.action = verdict.action;
-    state.shield.update({ action: verdict.action,
+    state.action = action;
+    state.shield.update({ action,
       reasons: [{ source: `${state.kind} frame ${msg.frameIndex + 1}: ${verdict.source || 'media'}`,
-        action: verdict.action }] });
+        action }] });
   }
 
   function reset() { for (const state of [...states.values()]) forget(state); }

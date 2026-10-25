@@ -11,6 +11,7 @@ export const MSG = {
   STATUS: 'status',
   GET_RUNTIME_SETTINGS: 'get-runtime-settings',
   RUNTIME_SETTINGS_CHANGED: 'runtime-settings-changed',
+  PROTECTION_CHANGED: 'protection-changed',
   ANYWHERE_ENABLE: 'anywhere-enable',
   ANYWHERE_DISABLE: 'anywhere-disable',
   ANYWHERE_STATE: 'anywhere-state',
@@ -24,6 +25,7 @@ export const MSG = {
   // Pushed to every tab when a background media pass upgrades an already-shown
   // text verdict. The content script filters on `key`.
   VERDICT_REFINED: 'verdict-refined',
+  VERDICTS_UPDATED: 'verdicts-updated',
   // Diagnostic: what the media pass actually did (settings, budget, OCR text,
   // per-image results). Read-only; exists because "the meme never blurs" has
   // too many silent failure points to guess at.

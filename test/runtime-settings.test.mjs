@@ -58,7 +58,7 @@ function offscreen(sendMessage) {
   return runInNewContext(`(() => { ${settingsSource}; return {
     runtime, syncRuntimeSettings, update(settings) { settingsChangeVersion++; applyRuntimeSettings(settings); }
   }; })()`, { MODERATION_DEFAULTS, MSG, Promise, chrome: { runtime: { sendMessage } },
-    log() {}, cancelQueuedOcr() {} });
+    log() {}, cancelQueuedOcr() {}, startLoading() {} });
 }
 
 test('offscreen settings initialize with runtime messaging and no storage API', async () => {

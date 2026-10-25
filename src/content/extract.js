@@ -176,7 +176,10 @@ const MIN_IMG_H = 110;
 const MAX_IMAGES_PER_UNIT = 3;
 
 /** Collect image URLs worth classifying inside a unit. */
-export function extractImages(root, { exclude = null, limit = MAX_IMAGES_PER_UNIT } = {}) {
+export function extractImages(root, {
+  exclude = null, limit = MAX_IMAGES_PER_UNIT, rasterize = true,
+  minWidth = MIN_IMG_W, minHeight = MIN_IMG_H
+} = {}) {
   if (!root || !root.querySelectorAll) return [];
   const out = [];
   const seen = new Set();
@@ -187,7 +190,7 @@ export function extractImages(root, { exclude = null, limit = MAX_IMAGES_PER_UNI
     if (!isVisible(img)) continue;
     const w = img.naturalWidth || img.width || 0;
     const h = img.naturalHeight || img.height || 0;
-    if (w < MIN_IMG_W || h < MIN_IMG_H) continue;
+    if (w < minWidth || h < minHeight) continue;
     let url = img.currentSrc || img.src || '';
     if (!url) continue;
     if (url.startsWith('data:')) {
@@ -199,7 +202,7 @@ export function extractImages(root, { exclude = null, limit = MAX_IMAGES_PER_UNI
     if (IMG_BLOCKLIST.test(url)) continue;
     if (seen.has(url)) continue;
     seen.add(url);
-    out.push({ url, el: img, dataUrl: maybeRaster(img) });
+    out.push({ url, el: img, dataUrl: rasterize ? maybeRaster(img) : null });
   }
   return out;
 }

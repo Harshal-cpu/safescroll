@@ -36,6 +36,15 @@ unpacked. A CRXJS development extension depends on `npm run dev` remaining
 open; if its localhost:5000 server stops, the popup logs `ERR_CONNECTION_REFUSED`
 and cannot run. The production `dist/` build has no localhost dependency.
 
+After every rebuild of `dist/`, click **Reload** on SafeScroll at
+`chrome://extensions`, then refresh any tabs that were already open. Chrome
+keeps the loaded manifest until the extension reloads; rebuilding files in
+place can otherwise leave its access rules out of sync with new bundle hashes.
+The content bundle and its imports have narrow wildcard access rules to survive
+hash changes, and the build verifies those rules. To test a fresh YouTube page
+in a disposable Chrome profile, run
+`node scripts/check-content-resource.mjs --youtube`.
+
 ## Eval
 
 ```bash
@@ -56,7 +65,7 @@ Neither fine-tuned model was wired in. Concrete next steps (real HASOC/TRAC regi
 2. **Hinglish text coverage**: weak (see eval above); shipped flagged, not silently.
 3. **Violence/gore detection**: implemented on-device with a pinned, locally bundled multi-label model. The model's published evaluation set is small (103 images), so thresholds are conservative and results remain probabilistic rather than a safety guarantee.
 4. **PaddleOCR fallback** for stylized/Devanagari meme text: optional polish, not built. Tesseract confidence < 35% returns empty rather than misclassifying.
-5. **Retraining**: feedback is logged to IndexedDB and exportable as CSV/JSON for periodic **manual** batch review. No automated retraining pipeline (out of scope).
+5. **Retraining**: no in-page report submission or automated retraining pipeline is available. Earlier local feedback records remain in IndexedDB.
 
 ## Compliance checklist (verified before packaging)
 
@@ -94,6 +103,6 @@ Neither fine-tuned model was wired in. Concrete next steps (real HASOC/TRAC regi
 ## UI features
 
 - **Popup**: master on/off switch (persists via chrome.storage.sync), model status badge, session stats (blocked/flagged), Anywhere mode toggle, dashboard link
-- **Options dashboard**: live threshold table (rendered from offscreen PROFILES), moderation stats (blocked/flagged/total), feedback export (JSON/CSV), Scroll Lock setting, Child Mode (parent PIN, PIN-gated overrides, state display)
-- **In-page**: verdict shields (loading/blocked/flagged states, Show anyway, Report wrong verdict), first-run model-loading banner, Child Mode scroll lock (blocked post freezes page behind a PIN screen; UNSALTED SHA-256 PIN - documented limitation)
+- **Options dashboard**: live threshold table (rendered from offscreen PROFILES), live verdict stats (blocked/flagged/clean/total), recent verdicts in local 12-hour time, Scroll Lock setting, Child Mode (parent PIN, PIN-gated overrides, state display)
+- **In-page**: verdict shields (loading/blocked/flagged states, Show anyway), first-run model-loading banner, Child Mode scroll lock (blocked post freezes page behind a PIN screen; UNSALTED SHA-256 PIN - documented limitation)
 - Settings storage: chrome.storage.sync (scrollLock, childMode, enabled)

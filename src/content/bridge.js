@@ -66,13 +66,6 @@ export async function classify(payload) {
   }
 }
 
-export async function reportFeedback(feedback) {
-  return sendRuntimeMessage({ type: 'feedback', feedback }).catch(e => {
-    if (isExtensionContextInvalidatedError(e)) return;
-    console.error('[SafeScroll] feedback failed:', e);
-  });
-}
-
 export async function checkModelsReady() {
   try {
     const resp = await sendRuntimeMessage({ type: 'status' });

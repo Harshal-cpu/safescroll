@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>SafeScroll Instagram shields</title>
+<style>
+  body { margin: 24px; font: 16px/1.4 Arial, sans-serif; }
+  main { max-width: 700px; }
+  article, [role="dialog"], #grid-tile { display: block; margin: 12px 0; padding: 12px; border: 1px solid #ccc; border-radius: 8px; }
+  header { display: flex; align-items: center; gap: 8px; }
+  .avatar { width: 48px; height: 48px; object-fit: cover; border-radius: 50%; }
+  .photo-link, #grid-tile { display: inline; }
+  .photo { width: 320px; height: 180px; object-fit: cover; }
+  #grid-tile img { width: 110px; height: 110px; object-fit: cover; }
+  [data-testid="post-caption"] span, [dir="auto"] { display: inline; }
+  li { margin: 8px 0; }
+  pre { white-space: pre-wrap; }
+</style>
+<main>
+  <article id="ig-post">
+    <header><img class="avatar" src="/test/meme-toxic.jpg" alt="Profile picture"><a href="/author/">author</a></header>
+    <a class="photo-link" href="/p/POST123/"><img id="post-photo" class="photo" src="/test/meme-toxic.jpg" alt="Post photo"></a>
+    <div data-testid="post-caption" id="caption">
+      <span dir="auto">You are worthless.</span>
+      <span dir="auto">Nobody wants you in this community.</span>
+    </div>
+    <ul>
+      <li role="listitem" id="ig-comment" data-comment-id="comment-1"><a href="/commenter/">commenter</a> <span dir="auto">Kill yourself</span> <button>Reply</button></li>
+    </ul>
+  </article>
+  <div role="dialog" id="comment-dialog"><ul>
+    <div data-testid="comment" id="ig-dialog-comment"><a href="/second-commenter/">second-commenter</a> <span dir="auto">You are vermin and nobody should tolerate you.</span></div>
+  </ul></div>
+  <a id="grid-tile" href="/reel/REEL123/"><img id="grid-photo" src="/test/meme-toxic.jpg" alt="Reel cover"></a>
+  <article id="video-post"><video controls poster="/test/meme-clean.jpg" width="320" height="180"></video><p>Quiet video caption</p></article>
+  <div id="allow-test"><span id="allow-target">Reveal test content</span></div>
+  <pre id="result">Running…</pre>
+</main>
+<script type="module">
+  import { materialise, instagramAdapter } from '../src/content/adapters.js';
+  import { createBlurShield } from '../src/content/shield.js';
+
+  await Promise.all([...document.images].map(image => image.decode().catch(() => {})));
+  const roots = instagramAdapter.units(document);
+  const unit = id => materialise(document.getElementById(id), instagramAdapter);
+  const post = unit('ig-post');
+  const comment = unit('ig-comment');
+  const dialogComment = unit('ig-dialog-comment');
+  const tile = unit('grid-tile');
+  const video = unit('video-post');
+  const commentRow = document.getElementById('ig-comment').getBoundingClientRect();
+  const tileBefore = document.getElementById('grid-tile').getBoundingClientRect();
+  const resultBefore = document.getElementById('result').getBoundingClientRect().top;
+  const captionTargets = instagramAdapter.textTargets(post);
+
+  const shield = (target, kind, action = 'block', source = kind === 'media' ? 'ocr-text' : 'text') => {
+    const created = createBlurShield(target, { siteId: 'instagram', target: kind });
+    created?.update({ action, reasons: [{ source, action }] });
+    return created;
+  };
+  const postMedia = shield(instagramAdapter.mediaTarget(post.images[0], post), 'media');
+  const postText = captionTargets.map(target => shield(target, 'text'));
+  const commentText = shield(instagramAdapter.textEl(comment), 'text', 'block', 'lexicon');
+  const dialogText = shield(instagramAdapter.textEl(dialogComment), 'text');
+  const tileMedia = shield(instagramAdapter.mediaTarget(tile.images[0], tile), 'media', 'flag', 'lexicon-ocr');
+  const videoPoster = shield(instagramAdapter.mediaTarget(video.images[0], video), 'media');
+  const reveal = shield(document.getElementById('allow-target'), 'text');
+  reveal.querySelector('button').click();
+  await Promise.resolve();
+  reveal.update({ action: 'block', reasons: [{ source: 'text', action: 'block' }] });
+  await new Promise(requestAnimationFrame);
+  await new Promise(requestAnimationFrame);
+
+  const contains = (outer, inner) => outer.width >= inner.width - 1 && outer.height >= inner.height - 1;
+  const alpha = element => Number(getComputedStyle(element).backgroundColor.match(/[\d.]+(?=\))/)?.[0] ?? 0);
+  const commentFragments = [...commentText.querySelectorAll('[data-safescroll-fragment]')];
+  const checks = {
+    postAndCommentsDetected: ['ig-post', 'ig-comment', 'ig-dialog-comment'].every(id => roots.includes(document.getElementById(id))),
+    gridReelDetected: roots.includes(document.getElementById('grid-tile')),
+    postTextExcludesCommentAndAuthor: post.text.includes('Nobody wants you') && !post.text.includes('Kill yourself') && !post.text.includes('author'),
+    captionCoveredAsOneCarrier: captionTargets.length === 1 && captionTargets[0].id === 'caption',
+    shortCommentDetected: comment.text === 'Kill yourself' && comment.minChars === 4,
+    commentTargetIsProse: instagramAdapter.textEl(comment)?.getAttribute('dir') === 'auto',
+    dialogCommentDetected: dialogComment.text.includes('You are vermin'),
+    avatarExcludedFromOcr: post.images.length === 1 && post.images[0].el.id === 'post-photo',
+    pausedVideoPosterExtracted: video.images.length === 1 &&
+      video.images[0].url.endsWith('/test/meme-clean.jpg') &&
+      instagramAdapter.mediaEl(video) === document.querySelector('#video-post video'),
+    videoPosterFullyShielded: contains(videoPoster.getBoundingClientRect(),
+      document.querySelector('#video-post video').getBoundingClientRect()),
+    reelCoverExtracted: tile.images.length === 1 && tile.images[0].el.id === 'grid-photo',
+    reelCoverFullyShielded: contains(tileMedia.getBoundingClientRect(), tile.images[0].el.getBoundingClientRect()),
+    postPhotoFullyShielded: contains(postMedia.getBoundingClientRect(), post.images[0].el.getBoundingClientRect()),
+    mediaBlurUnreadable: getComputedStyle(postMedia).backdropFilter.includes('22px') && alpha(postMedia) >= 0.6,
+    flaggedOcrBlurUnreadable: getComputedStyle(tileMedia).backdropFilter.includes('18px') && alpha(tileMedia) >= 0.6,
+    inlineCommentCovered: commentFragments.length >= 1 && alpha(commentFragments[0]) >= 0.6,
+    allTextShieldsPresent: [...postText, commentText, dialogText].every(item => item?.isConnected),
+    shieldCopyNotReclassified: unit('ig-post').text === post.text,
+    showAnywayPersistsAfterUpdate: reveal.dataset.userOverrode === '1' && reveal.style.display === 'none',
+    commentLayoutUnchanged: Math.abs(document.getElementById('ig-comment').getBoundingClientRect().top - commentRow.top) < 1,
+    gridLayoutUnchanged: Math.abs(document.getElementById('grid-tile').getBoundingClientRect().top - tileBefore.top) < 1
+      && Math.abs(document.getElementById('result').getBoundingClientRect().top - resultBefore) < 1
+  };
+  const pass = Object.values(checks).every(Boolean);
+  document.documentElement.dataset.testStatus = pass ? 'pass' : 'fail';
+  document.getElementById('result').textContent = JSON.stringify({ pass, checks }, null, 2);
+</script>
+</html>
